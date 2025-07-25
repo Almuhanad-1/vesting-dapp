@@ -1,11 +1,11 @@
-// src/hooks/useTokenVesting.ts
+// src/hooks/useTokenVesting.ts (FIXED)
 import {
   useReadContract,
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
 import { useState } from "react";
-import { TOKEN_VESTING_ABI } from "../web3/config";
+import { TOKEN_VESTING_ABI } from "@/lib/web3/config"; // Fixed import
 
 // Hook for claiming vested tokens
 export function useClaimVestedTokens(vestingContractAddress?: string) {
@@ -60,19 +60,6 @@ export function useVestingInfo(vestingContractAddress?: string) {
   });
 }
 
-// Hook for getting vesting status
-export function useVestingStatus(vestingContractAddress?: string) {
-  return useReadContract({
-    address: vestingContractAddress as `0x${string}`,
-    abi: TOKEN_VESTING_ABI,
-    functionName: "getVestingStatus",
-    query: {
-      enabled: !!vestingContractAddress,
-      refetchInterval: 30000, // Refetch every 30 seconds
-    },
-  });
-}
-
 // Hook for getting releasable amount
 export function useReleasableAmount(vestingContractAddress?: string) {
   return useReadContract({
@@ -84,40 +71,4 @@ export function useReleasableAmount(vestingContractAddress?: string) {
       refetchInterval: 30000, // Refetch every 30 seconds
     },
   });
-}
-
-// Hook for checking vesting status flags
-export function useVestingFlags(vestingContractAddress?: string) {
-  const { data: hasStarted } = useReadContract({
-    address: vestingContractAddress as `0x${string}`,
-    abi: TOKEN_VESTING_ABI,
-    functionName: "hasStarted",
-    query: {
-      enabled: !!vestingContractAddress,
-    },
-  });
-
-  const { data: cliffEnded } = useReadContract({
-    address: vestingContractAddress as `0x${string}`,
-    abi: TOKEN_VESTING_ABI,
-    functionName: "cliffEnded",
-    query: {
-      enabled: !!vestingContractAddress,
-    },
-  });
-
-  const { data: hasEnded } = useReadContract({
-    address: vestingContractAddress as `0x${string}`,
-    abi: TOKEN_VESTING_ABI,
-    functionName: "hasEnded",
-    query: {
-      enabled: !!vestingContractAddress,
-    },
-  });
-
-  return {
-    hasStarted,
-    cliffEnded,
-    hasEnded,
-  };
 }
