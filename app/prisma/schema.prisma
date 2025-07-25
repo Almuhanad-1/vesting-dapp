@@ -1,0 +1,210 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DIRECT_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  address     String   @unique
+  name        String?
+  email       String?
+  avatar      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  deployedTokens   DeployedToken[]
+  vestingSchedules VestingSchedule[]
+  batchDeployments BatchDeployment[]
+
+  @@map("users")
+}
+
+model DeployedToken {
+  id              String   @id @default(cuid())
+  address         String   @unique
+  name            String
+  symbol          String
+  totalSupply     String   // Using String for BigInt values
+  decimals        Int      @default(18)
+  ownerAddress    String
+  factoryTxHash   String
+  deployedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Metadata
+  description     String?
+  website         String?
+  logo            String?
+  category        String?
+
+  // Relations
+  owner            User               @relation(fields: [ownerAddress], references: [address])
+  vestingSchedules VestingSchedule[]
+  batchDeployment  BatchDeployment?   @relation(fields: [batchId], references: [id])
+  batchId          String?
+
+  @@map("deployed_tokens")
+}
+
+model VestingSchedule {
+  id                String   @id @default(cuid())
+  tokenId           String
+  contractAddress   String
+  beneficiaryAddress String
+  totalAmount       String   // Using String for BigInt values
+  cliffDuration     Int      // seconds
+  vestingDuration   Int      // seconds
+  startTime         DateTime
+  releasedAmount    String   @default("0")
+  revocable         Boolean  @default(false)
+  revoked           Boolean  @default(false)
+  revokedAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Metadata
+  category          String?  // team, investors, advisors, etc.
+  description       String?
+
+  // Relations
+  token       DeployedToken    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  beneficiary User             @relation(fields: [beneficiaryAddress], references: [address])
+  claims      VestingClaim[]
+
+  @@unique([contractAddress, beneficiaryAddress])
+  @@map("vesting_schedules")
+}
+
+model VestingClaim {
+  id                String   @id @default(cuid())
+  vestingScheduleId String
+  amountClaimed     String   // Using String for BigInt values
+  txHash            String   @unique
+  blockNumber       Int?
+  gasUsed           String?
+  gasPrice          String?
+  claimedAt         DateTime @default(now())
+
+  // Relations
+  vestingSchedule VestingSchedule @relation(fields: [vestingScheduleId], references: [id], onDelete: Cascade)
+
+  @@map("vesting_claims")
+}
+
+model BatchDeployment {
+  id                     String   @id @default(cuid())
+  batchId                String   @unique // blockchain batch ID
+  creatorAddress         String
+  tokenCount             Int
+  totalVestingSchedules  Int
+  status                 BatchStatus @default(PENDING)
+  startedAt              DateTime    @default(now())
+  completedAt            DateTime?
+  failedAt               DateTime?
+  errorMessage           String?
+
+  // Progress tracking
+  tokensDeployed         Int      @default(0)
+  vestingSchedulesCreated Int     @default(0)
+
+  // Metadata
+  name                   String?
+  description            String?
+  configFile             String?  // path to uploaded config file
+
+  // Relations
+  creator                User           @relation(fields: [creatorAddress], references: [address])
+  tokens                 DeployedToken[]
+
+  @@map("batch_deployments")
+}
+
+model CategoryAllocation {
+  id          String   @id @default(cuid())
+  tokenId     String
+  category    String   // team, investors, advisors, community, etc.
+  percentage  Float    // 0-100
+  amount      String   // calculated amount in tokens
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tokenId, category])
+  @@map("category_allocations")
+}
+
+model TokenAnalytics {
+  id                    String   @id @default(cuid())
+  tokenAddress          String   @unique
+  totalBeneficiaries    Int      @default(0)
+  totalVestingContracts Int      @default(0)
+  totalVestedAmount     String   @default("0")
+  totalClaimedAmount    String   @default("0")
+  totalRemainingAmount  String   @default("0")
+  activeVestingSchedules Int     @default(0)
+  completedVestingSchedules Int  @default(0)
+  revokedVestingSchedules Int    @default(0)
+  lastUpdated           DateTime @default(now())
+
+  @@map("token_analytics")
+}
+
+model SystemSettings {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+// Activity log for audit trail
+model ActivityLog {
+  id          String      @id @default(cuid())
+  userAddress String?
+  action      ActionType
+  entityType  EntityType
+  entityId    String
+  details     Json?       // Additional metadata
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime    @default(now())
+
+  @@map("activity_logs")
+}
+
+// Enums
+enum BatchStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ActionType {
+  CREATE
+  UPDATE
+  DELETE
+  DEPLOY
+  CLAIM
+  REVOKE
+  BATCH_DEPLOY
+  UPLOAD
+}
+
+enum EntityType {
+  TOKEN
+  VESTING_SCHEDULE
+  BATCH_DEPLOYMENT
+  USER
+  CATEGORY_ALLOCATION
+}
