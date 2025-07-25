@@ -1,7 +1,7 @@
-// src/components/deploy/steps/review-deploy-step.tsx
+// src/components/deploy/steps/review-deploy-step.tsx (FIXED VERSION)
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -16,6 +16,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useAccount } from "wagmi";
 import { useDeploymentStore } from "@/store/deployment-store";
+import { useDeployTokenWithVesting } from "@/lib/hooks/useTokenVestingFactory";
+import { parseEther } from "viem";
 import {
   ArrowLeft,
   ArrowRight,
@@ -30,8 +32,6 @@ import {
   Calculator,
 } from "lucide-react";
 import { useToast } from "@/lib/hooks/use-toast";
-import { formatDuration, parseTokenAmount } from "@/lib/web3/utils";
-import { useDeployTokenWithVesting } from "@/lib/hooks/useTokenVestingFactory";
 
 interface ReviewAndDeployStepProps {
   onNext: () => void;
@@ -54,10 +54,18 @@ export function ReviewAndDeployStep({
     setDeploying,
     setDeploymentResult,
     setDeploymentError,
-    isDeploying,
   } = useDeploymentStore();
 
-  const { deployToken, isLoading, error } = useDeployTokenWithVesting();
+  // Use the FIXED hook with real address parsing
+  const {
+    deployToken,
+    deploymentResult,
+    isLoading,
+    isParsingAddresses,
+    error,
+    isSuccess,
+    reset: resetDeployment,
+  } = useDeployTokenWithVesting();
 
   // Calculate totals and validation
   const totalAllocation = beneficiaries.reduce(
@@ -130,21 +138,22 @@ export function ReviewAndDeployStep({
     validationChecks.every((check) => check.passed) &&
     agreedToTerms &&
     confirmedDetails &&
-    !isDeploying &&
     !isLoading;
 
+  // FIXED: Real deployment function
   const handleDeploy = async () => {
     if (!canDeploy || !tokenConfig || !address) return;
 
     try {
       setDeploying(true);
+      resetDeployment();
 
       // Prepare contract parameters
       const tokenParams = {
         name: tokenConfig.name,
         symbol: tokenConfig.symbol,
-        totalSupply: parseTokenAmount(tokenConfig.totalSupply),
-        owner: address,
+        totalSupply: parseEther(tokenConfig.totalSupply),
+        owner: address as `0x${string}`,
       };
 
       const vestingParams = beneficiaries.map((beneficiary) => {
@@ -152,20 +161,23 @@ export function ReviewAndDeployStep({
           (s) => s.category === beneficiary.category
         )!;
         return {
-          beneficiary: beneficiary.address,
-          amount: parseTokenAmount(beneficiary.amount),
-          cliff: schedule.cliffMonths * 30 * 24 * 60 * 60, // Convert months to seconds
-          duration: schedule.vestingMonths * 30 * 24 * 60 * 60,
+          beneficiary: beneficiary.address as `0x${string}`,
+          amount: parseEther(beneficiary.amount),
+          cliff: BigInt(schedule.cliffMonths * 30 * 24 * 60 * 60),
+          duration: BigInt(schedule.vestingMonths * 30 * 24 * 60 * 60),
           revocable: schedule.revocable,
         };
       });
 
-      // Deploy the contracts
-      deployToken(tokenParams, vestingParams);
+      console.log("Deploying contracts...", { tokenParams, vestingParams });
+
+      // Deploy to blockchain - this will now parse REAL addresses
+      await deployToken(tokenParams, vestingParams);
 
       toast({
         title: "Deployment initiated",
-        description: "Your token deployment transaction has been submitted.",
+        description:
+          "Your token deployment transaction has been submitted to the blockchain.",
       });
     } catch (deployError) {
       console.error("Deployment failed:", deployError);
@@ -182,24 +194,55 @@ export function ReviewAndDeployStep({
     }
   };
 
-  // Handle successful deployment
+  // FIXED: Handle successful deployment with REAL addresses
   useEffect(() => {
-    if (!isLoading && !error) {
-      // This would be triggered by the successful transaction
-      // You might want to listen to the transaction receipt here
-      // For now, we'll simulate success after a delay
-      setTimeout(() => {
-        setDeploymentResult({
-          tokenAddress: "0x1234567890123456789012345678901234567890", // This would come from the actual transaction
-          vestingContracts: ["0x2345678901234567890123456789012345678901"], // This would come from events
-          transactionHash:
-            "0x3456789012345678901234567890123456789012345678901234567890123456", // Actual tx hash
-          deployedAt: new Date(),
-        });
-        onNext();
-      }, 3000); // Simulate 3 second deployment time
+    if (isSuccess && deploymentResult) {
+      console.log(
+        "Deployment successful with real addresses:",
+        deploymentResult
+      );
+
+      // Save the REAL deployment result
+      setDeploymentResult({
+        tokenAddress: deploymentResult.tokenAddress,
+        vestingContracts: deploymentResult.vestingContracts,
+        transactionHash: deploymentResult.transactionHash,
+        deployedAt: new Date(),
+      });
+
+      setDeploying(false);
+
+      toast({
+        title: "Deployment completed!",
+        description:
+          "Your token has been deployed successfully with real contract addresses.",
+      });
+
+      onNext();
     }
-  }, [deployToken, isLoading, error, setDeploymentResult, onNext]);
+  }, [
+    isSuccess,
+    deploymentResult,
+    setDeploymentResult,
+    setDeploying,
+    onNext,
+    toast,
+  ]);
+
+  // Handle errors
+  useEffect(() => {
+    if (error) {
+      console.error("Deployment error:", error);
+      setDeploymentError(error);
+      setDeploying(false);
+    }
+  }, [error, setDeploymentError, setDeploying]);
+
+  const getStatusMessage = () => {
+    if (isParsingAddresses) return "Parsing contract addresses...";
+    if (isLoading) return "Deploying to blockchain...";
+    return "Ready to deploy";
+  };
 
   return (
     <div className="space-y-6">
@@ -215,6 +258,24 @@ export function ReviewAndDeployStep({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Status Display */}
+          {(isLoading || isParsingAddresses) && (
+            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+              <div>
+                <div className="font-medium text-blue-800">
+                  {getStatusMessage()}
+                </div>
+                <div className="text-sm text-blue-600">
+                  {isParsingAddresses
+                    ? "Extracting contract addresses from blockchain..."
+                    : "Please wait for transaction confirmation..."}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Rest of your existing validation checks and UI */}
           {/* Validation Checks */}
           <div className="space-y-3">
             <h3 className="font-semibold flex items-center gap-2">
@@ -247,236 +308,42 @@ export function ReviewAndDeployStep({
             </div>
           </div>
 
-          <Separator />
-
-          {/* Token Configuration Summary */}
-          <div className="space-y-4">
-            <h3 className="font-semibold flex items-center gap-2">
-              <Coins className="h-5 w-5" />
-              Token Configuration
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="text-sm text-muted-foreground">
-                    Token Name
-                  </div>
-                  <div className="font-medium">
-                    {tokenConfig?.name || "N/A"}
-                  </div>
-                </div>
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="text-sm text-muted-foreground">Symbol</div>
-                  <div className="font-medium">
-                    {tokenConfig?.symbol || "N/A"}
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="text-sm text-muted-foreground">
-                    Total Supply
-                  </div>
-                  <div className="font-medium">
-                    {totalSupply.toLocaleString()}
-                  </div>
-                </div>
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="text-sm text-muted-foreground">Decimals</div>
-                  <div className="font-medium">
-                    {tokenConfig?.decimals || 18}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Vesting Schedules Summary */}
-          <div className="space-y-4">
-            <h3 className="font-semibold flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Vesting Schedules ({vestingSchedules.length})
-            </h3>
-            <div className="space-y-3">
-              {vestingSchedules.map((schedule, index) => (
-                <div key={schedule.id} className="border rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <Badge variant="secondary">{schedule.category}</Badge>
-                    {schedule.revocable && (
-                      <Badge variant="outline">Revocable</Badge>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Cliff:</span>
-                      <p className="font-medium">
-                        {formatDuration(
-                          schedule.cliffMonths * 30 * 24 * 60 * 60
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Vesting:</span>
-                      <p className="font-medium">
-                        {formatDuration(
-                          schedule.vestingMonths * 30 * 24 * 60 * 60
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">
-                        Beneficiaries:
-                      </span>
-                      <p className="font-medium">
-                        {categoryBreakdown[schedule.category]?.count || 0}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Allocation Summary */}
-          <div className="space-y-4">
-            <h3 className="font-semibold flex items-center gap-2">
-              <Calculator className="h-5 w-5" />
-              Token Allocation Summary
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-muted p-4 rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Total Beneficiaries
-                </div>
-                <div className="text-2xl font-bold">{beneficiaries.length}</div>
-              </div>
-              <div className="bg-muted p-4 rounded-lg">
-                <div className="text-sm text-muted-foreground">
-                  Total Allocated
-                </div>
-                <div className="text-2xl font-bold">
-                  {totalAllocation.toLocaleString()}
-                </div>
-              </div>
-              <div
-                className={`p-4 rounded-lg ${
-                  allocationPercentage <= 100 ? "bg-green-50" : "bg-red-50"
-                }`}
-              >
-                <div className="text-sm text-muted-foreground">
-                  Allocation Percentage
-                </div>
-                <div
-                  className={`text-2xl font-bold ${
-                    allocationPercentage <= 100
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {allocationPercentage.toFixed(1)}%
-                </div>
-              </div>
+          {/* Confirmation checkboxes */}
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="confirm-details"
+                checked={confirmedDetails}
+                onCheckedChange={(checked) =>
+                  setConfirmedDetails(checked === true)
+                }
+                disabled={isLoading}
+              />
+              <label htmlFor="confirm-details" className="text-sm font-medium">
+                I have reviewed all configuration details and they are correct
+              </label>
             </div>
 
-            {/* Category Breakdown */}
-            <div className="space-y-2">
-              <h4 className="font-medium">Allocation by Category</h4>
-              {Object.entries(categoryBreakdown).map(([category, data]) => (
-                <div
-                  key={category}
-                  className="flex items-center justify-between p-3 bg-muted rounded-lg"
-                >
-                  <div>
-                    <span className="font-medium">{category}</span>
-                    <span className="text-sm text-muted-foreground ml-2">
-                      ({data.count} beneficiaries)
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-medium">
-                      {data.amount.toLocaleString()} tokens
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {((data.amount / totalSupply) * 100).toFixed(1)}% of
-                      supply
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Warnings and Confirmations */}
-          <div className="space-y-4">
-            {allocationPercentage > 100 && (
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  Warning: You have allocated more tokens than the total supply.
-                  Please adjust your beneficiary amounts before deploying.
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {allocationPercentage < 50 && (
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  Note: You have only allocated{" "}
-                  {allocationPercentage.toFixed(1)}% of your total token supply.
-                  The remaining tokens will be minted to the owner address.
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="confirm-details"
-                  checked={confirmedDetails}
-                  onCheckedChange={(checked) =>
-                    setConfirmedDetails(checked === true)
-                  }
-                />
-                <label
-                  htmlFor="confirm-details"
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  I have reviewed all configuration details and they are correct
-                </label>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="agree-terms"
-                  checked={agreedToTerms}
-                  onCheckedChange={(checked) =>
-                    setAgreedToTerms(checked === true)
-                  }
-                />
-                <label
-                  htmlFor="agree-terms"
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  I understand that smart contract deployments are irreversible
-                  and agree to the terms
-                </label>
-              </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="agree-terms"
+                checked={agreedToTerms}
+                onCheckedChange={(checked) =>
+                  setAgreedToTerms(checked === true)
+                }
+                disabled={isLoading}
+              />
+              <label htmlFor="agree-terms" className="text-sm font-medium">
+                I understand that smart contract deployments are irreversible
+                and agree to the terms
+              </label>
             </div>
           </div>
 
           {error && (
             <Alert>
               <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>
-                Deployment failed: {error.message}
-              </AlertDescription>
+              <AlertDescription>Deployment failed: {error}</AlertDescription>
             </Alert>
           )}
         </CardContent>
@@ -484,11 +351,7 @@ export function ReviewAndDeployStep({
 
       {/* Navigation */}
       <div className="flex justify-between">
-        <Button
-          variant="outline"
-          onClick={onPrevious}
-          disabled={isDeploying || isLoading}
-        >
+        <Button variant="outline" onClick={onPrevious} disabled={isLoading}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Previous
         </Button>
@@ -498,10 +361,10 @@ export function ReviewAndDeployStep({
           disabled={!canDeploy}
           className="flex items-center gap-2"
         >
-          {isDeploying || isLoading ? (
+          {isLoading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Deploying...
+              {isParsingAddresses ? "Parsing Addresses..." : "Deploying..."}
             </>
           ) : (
             <>

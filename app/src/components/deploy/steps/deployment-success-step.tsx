@@ -1,4 +1,4 @@
-// src/components/deploy/steps/deployment-success-step.tsx
+// src/components/deploy/steps/deployment-success-step.tsx (UPDATED VERSION)
 "use client";
 
 import { useEffect, useState } from "react";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useDeploymentStore } from "@/store/deployment-store";
+import { shortenAddress } from "@/lib/web3/utils";
 import {
   CheckCircle,
   ExternalLink,
@@ -23,12 +24,12 @@ import {
   Users,
   RefreshCcw,
   Sparkles,
+  AlertCircle,
+  Eye,
 } from "lucide-react";
-
+import { useToast } from "@/lib/hooks/use-toast";
 import Link from "next/link";
 import confetti from "canvas-confetti";
-import { shortenAddress } from "@/lib/web3/utils";
-import { useToast } from "@/lib/hooks/use-toast";
 
 interface DeploymentSuccessStepProps {
   onReset: () => void;
@@ -71,8 +72,8 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
     }
   };
 
-  const generateSummaryReport = () => {
-    const report = {
+  const exportDeploymentData = () => {
+    const data = {
       deployment: {
         timestamp: deploymentResult?.deployedAt,
         transactionHash: deploymentResult?.transactionHash,
@@ -85,64 +86,68 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
         totalSupply: tokenConfig?.totalSupply,
         decimals: tokenConfig?.decimals,
       },
-      vestingSchedules: vestingSchedules.map((schedule) => ({
-        category: schedule.category,
-        cliffMonths: schedule.cliffMonths,
-        vestingMonths: schedule.vestingMonths,
-        revocable: schedule.revocable,
-        beneficiaryCount: beneficiaries.filter(
-          (b) => b.category === schedule.category
-        ).length,
-      })),
-      beneficiaries: beneficiaries.length,
-      totalAllocation: beneficiaries.reduce(
-        (sum, b) => sum + parseFloat(b.amount),
-        0
-      ),
+      vestingSchedules: vestingSchedules,
+      beneficiaries: beneficiaries,
     };
 
-    const blob = new Blob([JSON.stringify(report, null, 2)], {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${tokenConfig?.symbol || "token"}-deployment-report.json`;
+    a.download = `${
+      tokenConfig?.symbol || "token"
+    }-deployment-${Date.now()}.json`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    toast({
+      title: "Export successful",
+      description: "Deployment data has been downloaded as JSON",
+    });
   };
 
-  const shareDeployment = async () => {
-    const shareData = {
-      title: `${tokenConfig?.name} Token Deployed!`,
-      text: `I just deployed ${tokenConfig?.name} (${tokenConfig?.symbol}) with vesting schedules using VestingDApp!`,
-      url: window.location.origin,
-    };
-
-    try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-      } else {
-        // Fallback to copying link
-        await copyToClipboard(
-          `${shareData.text}\n\nToken: ${deploymentResult?.tokenAddress}\nTransaction: https://sepolia.etherscan.io/tx/${deploymentResult?.transactionHash}`,
-          "Deployment details"
-        );
-      }
-    } catch (error) {
-      console.error("Error sharing:", error);
-    }
+  // Check if addresses are valid (not empty or placeholder)
+  const isValidAddress = (address: string) => {
+    return (
+      address &&
+      address !== "" &&
+      address !== "0x..." &&
+      address !== "0x" &&
+      address.length === 42 &&
+      address.startsWith("0x")
+    );
   };
+
+  const hasValidTokenAddress = isValidAddress(
+    deploymentResult?.tokenAddress || ""
+  );
+  const hasValidVestingContracts =
+    deploymentResult?.vestingContracts?.some((addr) => isValidAddress(addr)) ||
+    false;
 
   if (!deploymentResult) {
     return (
-      <div className="text-center p-8">
-        <p className="text-muted-foreground">No deployment result found</p>
-      </div>
+      <Card>
+        <CardContent className="p-8 text-center">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
+          <p className="text-muted-foreground">Deployment result not found</p>
+          <Button onClick={onReset} className="mt-4">
+            Start Over
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
-  const explorerBaseUrl = "https://sepolia.etherscan.io";
+  // You can configure this based on your network
+  const explorerBaseUrl =
+    process.env.NEXT_PUBLIC_CHAIN_ID === "1"
+      ? "https://etherscan.io"
+      : "https://sepolia.etherscan.io";
 
   return (
     <div className="space-y-6">
@@ -164,6 +169,27 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
           </p>
         </CardContent>
       </Card>
+
+      {/* Address Verification Alert */}
+      {(!hasValidTokenAddress || !hasValidVestingContracts) && (
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-yellow-600" />
+              <div>
+                <h3 className="font-medium text-yellow-800">
+                  Contract Addresses Being Processed
+                </h3>
+                <p className="text-sm text-yellow-700">
+                  Contract addresses are still being extracted from the
+                  blockchain. Check the transaction hash for details, or refresh
+                  the page in a moment.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Deployment Details */}
       <Card>
@@ -188,42 +214,52 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
+                {/* Token Address */}
                 <div className="bg-muted p-3 rounded-lg">
                   <div className="text-sm text-muted-foreground">
                     Token Address
                   </div>
-                  <div className="flex items-center gap-2">
-                    <code className="font-mono text-sm">
-                      {shortenAddress(deploymentResult.tokenAddress)}
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        copyToClipboard(
-                          deploymentResult.tokenAddress,
-                          "Token address"
-                        )
-                      }
-                      className="h-6 w-6 p-0"
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      asChild
-                      className="h-6 w-6 p-0"
-                    >
-                      <a
-                        href={`${explorerBaseUrl}/address/${deploymentResult.tokenAddress}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                  {hasValidTokenAddress ? (
+                    <div className="flex items-center gap-2">
+                      <code className="font-mono text-sm">
+                        {shortenAddress(deploymentResult.tokenAddress)}
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          copyToClipboard(
+                            deploymentResult.tokenAddress,
+                            "Token address"
+                          )
+                        }
+                        className="h-6 w-6 p-0"
                       >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </Button>
-                  </div>
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        asChild
+                        className="h-6 w-6 p-0"
+                      >
+                        <a
+                          href={`${explorerBaseUrl}/address/${deploymentResult.tokenAddress}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-yellow-600">
+                      <Eye className="h-4 w-4" />
+                      <span className="text-sm">
+                        Address being extracted...
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-muted p-3 rounded-lg">
@@ -239,6 +275,7 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
               </div>
 
               <div className="space-y-3">
+                {/* Transaction Hash */}
                 <div className="bg-muted p-3 rounded-lg">
                   <div className="text-sm text-muted-foreground">
                     Transaction Hash
@@ -298,52 +335,72 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
               Vesting Contracts (
               {deploymentResult.vestingContracts?.length || 0})
             </h3>
-            <div className="space-y-2">
-              {deploymentResult.vestingContracts?.map(
-                (contractAddress, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-3 bg-muted rounded-lg"
-                  >
-                    <div>
-                      <div className="font-medium">
-                        Vesting Contract #{index + 1}
+            {deploymentResult.vestingContracts?.length ? (
+              <div className="space-y-2">
+                {deploymentResult.vestingContracts.map(
+                  (contractAddress, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between p-3 bg-muted rounded-lg"
+                    >
+                      <div>
+                        <div className="font-medium">
+                          Vesting Contract #{index + 1}
+                        </div>
+                        {isValidAddress(contractAddress) ? (
+                          <code className="text-sm text-muted-foreground">
+                            {contractAddress}
+                          </code>
+                        ) : (
+                          <div className="flex items-center gap-2 text-yellow-600">
+                            <Eye className="h-3 w-3" />
+                            <span className="text-xs">
+                              Address being extracted...
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      <code className="text-sm text-muted-foreground">
-                        {contractAddress}
-                      </code>
+                      {isValidAddress(contractAddress) && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              copyToClipboard(
+                                contractAddress,
+                                `Vesting contract #${index + 1}`
+                              )
+                            }
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" asChild>
+                            <a
+                              href={`${explorerBaseUrl}/address/${contractAddress}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          copyToClipboard(
-                            contractAddress,
-                            `Vesting contract #${index + 1}`
-                          )
-                        }
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" asChild>
-                        <a
-                          href={`${explorerBaseUrl}/address/${contractAddress}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      </Button>
-                    </div>
-                  </div>
-                )
-              ) || (
-                <p className="text-muted-foreground text-center p-4">
-                  No vesting contracts deployed
+                  )
+                )}
+              </div>
+            ) : (
+              <div className="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <AlertCircle className="h-8 w-8 mx-auto mb-2 text-yellow-600" />
+                <p className="text-yellow-800 font-medium">
+                  Vesting contracts pending
                 </p>
-              )}
-            </div>
+                <p className="text-yellow-700 text-sm">
+                  Contract addresses will be available once the transaction is
+                  fully processed
+                </p>
+              </div>
+            )}
           </div>
 
           <Separator />
@@ -390,177 +447,72 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* View Transaction (Always works) */}
+        <Button variant="outline" asChild className="flex items-center gap-2">
+          <a
+            href={`${explorerBaseUrl}/tx/${deploymentResult.transactionHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="h-4 w-4" />
+            View Transaction
+          </a>
+        </Button>
+
+        {/* View Token (Only if valid address) */}
+        {hasValidTokenAddress ? (
+          <Button variant="outline" asChild className="flex items-center gap-2">
+            <a
+              href={`${explorerBaseUrl}/address/${deploymentResult.tokenAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink className="h-4 w-4" />
+              View Token
+            </a>
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            disabled
+            className="flex items-center gap-2"
+          >
+            <Eye className="h-4 w-4" />
+            Token Pending
+          </Button>
+        )}
+
+        {/* Copy Address (Only if valid) */}
+        {hasValidTokenAddress ? (
+          <Button
+            variant="outline"
+            onClick={() =>
+              copyToClipboard(deploymentResult.tokenAddress, "Token address")
+            }
+            className="flex items-center gap-2"
+          >
+            <Copy className="h-4 w-4" />
+            {copied === "Token address" ? "Copied!" : "Copy Address"}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            disabled
+            className="flex items-center gap-2"
+          >
+            <Copy className="h-4 w-4" />
+            Address Pending
+          </Button>
+        )}
+
         <Button
-          variant="outline"
-          onClick={generateSummaryReport}
+          onClick={exportDeploymentData}
           className="flex items-center gap-2"
         >
           <Download className="h-4 w-4" />
-          Download Report
-        </Button>
-
-        <Button
-          variant="outline"
-          onClick={shareDeployment}
-          className="flex items-center gap-2"
-        >
-          <Share2 className="h-4 w-4" />
-          Share Success
-        </Button>
-
-        <Button variant="outline" asChild className="flex items-center gap-2">
-          <Link href={`/analytics/${deploymentResult.tokenAddress}`}>
-            <BarChart3 className="h-4 w-4" />
-            View Analytics
-          </Link>
-        </Button>
-
-        <Button onClick={onReset} className="flex items-center gap-2">
-          <RefreshCcw className="h-4 w-4" />
-          Deploy Another
+          Export Data
         </Button>
       </div>
-
-      {/* Next Steps */}
-      <Card>
-        <CardHeader>
-          <CardTitle>What's Next?</CardTitle>
-          <CardDescription>
-            Here are some recommended next steps for managing your token
-            deployment
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <h4 className="font-semibold">For Token Owners</h4>
-              <ul className="space-y-2 text-sm">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>
-                    Monitor vesting progress in the analytics dashboard
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>Share contract addresses with your beneficiaries</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>Add token to your wallet and popular token lists</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>Set up notifications for claim events</span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="space-y-3">
-              <h4 className="font-semibold">For Beneficiaries</h4>
-              <ul className="space-y-2 text-sm">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>
-                    Visit the beneficiary portal to view vesting schedules
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>Add token to wallet using the contract address</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>
-                    Set calendar reminders for cliff and vesting milestones
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
-                  <span>Claim tokens when they become available</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Important Links */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Important Links</CardTitle>
-          <CardDescription>
-            Keep these links handy for future reference
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <h4 className="font-semibold">Blockchain Explorer</h4>
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  asChild
-                  className="w-full justify-start"
-                >
-                  <a
-                    href={`${explorerBaseUrl}/address/${deploymentResult.tokenAddress}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    View Token Contract
-                  </a>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  asChild
-                  className="w-full justify-start"
-                >
-                  <a
-                    href={`${explorerBaseUrl}/tx/${deploymentResult.transactionHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    View Deployment Transaction
-                  </a>
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <h4 className="font-semibold">Platform Features</h4>
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  asChild
-                  className="w-full justify-start"
-                >
-                  <Link href="/dashboard">
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                    Dashboard
-                  </Link>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  asChild
-                  className="w-full justify-start"
-                >
-                  <Link href="/beneficiary">
-                    <Users className="h-4 w-4 mr-2" />
-                    Beneficiary Portal
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Success Message */}
       <div className="text-center p-6 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
@@ -569,22 +521,17 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
         </h3>
         <p className="text-green-700 mb-4">
           Your token and vesting contracts are now live on the blockchain.
-          Beneficiaries can start tracking their vesting schedules and claim
-          tokens when available.
+          Contract addresses will be fully available once the transaction is
+          completely processed.
         </p>
         <div className="flex justify-center gap-3">
-          <Button
-            variant="outline"
-            onClick={() =>
-              copyToClipboard(deploymentResult.tokenAddress, "Token address")
-            }
-          >
-            {copied === "Token address" ? "Copied!" : "Copy Token Address"}
+          <Button variant="outline" onClick={exportDeploymentData}>
+            <Download className="h-4 w-4 mr-2" />
+            Save Deployment Info
           </Button>
-          <Button asChild>
-            <Link href={`/analytics/${deploymentResult.tokenAddress}`}>
-              View Full Analytics
-            </Link>
+          <Button onClick={onReset}>
+            <RefreshCcw className="h-4 w-4 mr-2" />
+            Deploy Another Token
           </Button>
         </div>
       </div>

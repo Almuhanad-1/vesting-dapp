@@ -1,15 +1,15 @@
 // src/hooks/useTokenVestingFactory.ts
 import {
-  useReadContract,
   useWriteContract,
   useWaitForTransactionReceipt,
+  usePublicClient,
 } from "wagmi";
 import {
   CONTRACT_ADDRESSES,
   TOKEN_VESTING_FACTORY_ABI,
 } from "@/lib/web3/config";
-import { parseEther } from "viem";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { waitForDeploymentAndParse } from "@/lib/web3/transaction-parser";
 
 export interface TokenConfig {
   name: string;
@@ -21,31 +21,137 @@ export interface TokenConfig {
 export interface VestingConfig {
   beneficiary: string;
   amount: bigint;
-  cliff: number;
-  duration: number;
+  cliff: bigint;
+  duration: bigint;
   revocable: boolean;
+}
+
+export interface DeploymentResult {
+  tokenAddress: string;
+  vestingContracts: string[];
+  transactionHash: string;
 }
 
 // Hook for deploying token with vesting
 export function useDeployTokenWithVesting() {
-  const [isPending, setIsPending] = useState(false);
+  const [deploymentResult, setDeploymentResult] =
+    useState<DeploymentResult | null>(null);
+  const [deploymentError, setDeploymentError] = useState<string | null>(null);
+  const [isParsingAddresses, setIsParsingAddresses] = useState(false);
+
+  const publicClient = usePublicClient();
+
   const {
     writeContract,
     data: hash,
-    error,
+    error: writeError,
     isPending: isWritePending,
+    reset: resetWrite,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+  const {
+    isLoading: isConfirming,
+    isSuccess: isTxSuccess,
+    error: waitError,
+  } = useWaitForTransactionReceipt({
     hash,
   });
+
+  // Parse transaction when it's successful
+  useEffect(() => {
+    async function parseTransaction() {
+      if (isTxSuccess && hash && publicClient && !isParsingAddresses) {
+        try {
+          setIsParsingAddresses(true);
+          console.log(
+            "Transaction successful, parsing contract addresses...",
+            hash
+          );
+
+          // Parse the real addresses from the transaction
+          const addresses = await waitForDeploymentAndParse(publicClient, hash);
+
+          console.log("Successfully parsed addresses:", addresses);
+
+          setDeploymentResult({
+            tokenAddress: addresses.tokenAddress,
+            vestingContracts: addresses.vestingContracts,
+            transactionHash: hash,
+          });
+
+          setDeploymentError(null);
+          setIsParsingAddresses(false);
+        } catch (error) {
+          console.error("Failed to parse deployment addresses:", error);
+          setDeploymentError(
+            `Failed to parse contract addresses: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`
+          );
+          setIsParsingAddresses(false);
+
+          // Set a fallback result with the transaction hash
+          // so users can at least see the transaction
+          setDeploymentResult({
+            tokenAddress: "", // Empty but won't show broken links
+            vestingContracts: [],
+            transactionHash: hash,
+          });
+        }
+      }
+    }
+
+    parseTransaction();
+  }, [isTxSuccess, hash, publicClient, isParsingAddresses]);
+
+  // Handle errors
+  useEffect(() => {
+    if (writeError) {
+      console.error("Write contract error:", writeError);
+      setDeploymentError(writeError.message || "Transaction failed");
+    }
+    if (waitError) {
+      console.error("Wait for transaction error:", waitError);
+      setDeploymentError(
+        waitError.message || "Transaction confirmation failed"
+      );
+    }
+  }, [writeError, waitError]);
 
   const deployToken = async (
     tokenConfig: TokenConfig,
     vestingConfigs: VestingConfig[]
   ) => {
     try {
-      setIsPending(true);
+      // Reset previous state
+      setDeploymentResult(null);
+      setDeploymentError(null);
+      setIsParsingAddresses(false);
+      resetWrite();
+
+      // Validate inputs
+      if (
+        !tokenConfig.name ||
+        !tokenConfig.symbol ||
+        !tokenConfig.totalSupply
+      ) {
+        throw new Error("Invalid token configuration");
+      }
+
+      if (vestingConfigs.length === 0) {
+        throw new Error("At least one vesting configuration is required");
+      }
+
+      // Validate addresses
+      vestingConfigs.forEach((config, index) => {
+        if (!config.beneficiary || !config.beneficiary.startsWith("0x")) {
+          throw new Error(`Invalid beneficiary address at index ${index}`);
+        }
+      });
+
+      console.log("Deploying token with config:", {
+        vestingConfigs: vestingConfigs.length,
+      });
 
       await writeContract({
         address: CONTRACT_ADDRESSES.FACTORY as `0x${string}`,
@@ -56,112 +162,37 @@ export function useDeployTokenWithVesting() {
             ...tokenConfig,
             owner: tokenConfig.owner as `0x${string}`,
           },
-          vestingConfigs.map((vc) => ({
-            ...vc,
-            beneficiary: vc.beneficiary as `0x${string}`,
-            cliff: BigInt(vc.cliff),
-            duration: BigInt(vc.duration),
+          vestingConfigs.map((config) => ({
+            ...config,
+            beneficiary: config.beneficiary as `0x${string}`,
           })),
         ],
       });
     } catch (err) {
       console.error("Deployment error:", err);
-      setIsPending(false);
+      const errorMessage =
+        err instanceof Error ? err.message : "Unknown deployment error";
+      setDeploymentError(errorMessage);
       throw err;
     }
   };
+
+  const isLoading = isWritePending || isConfirming || isParsingAddresses;
+  const isSuccess = isTxSuccess && !!deploymentResult && !isParsingAddresses;
 
   return {
     deployToken,
+    deploymentResult,
     data: hash,
-    error,
-    isLoading: isPending || isWritePending || isConfirming,
+    error: deploymentError,
+    isLoading,
     isSuccess,
-  };
-}
-
-// Hook for batch deployment
-export function useBatchDeployTokens() {
-  const [isPending, setIsPending] = useState(false);
-  const {
-    writeContract,
-    data: hash,
-    error,
-    isPending: isWritePending,
-  } = useWriteContract();
-
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
-    hash,
-  });
-
-  const batchDeploy = async (
-    tokenConfigs: TokenConfig[],
-    vestingConfigsArray: VestingConfig[][]
-  ) => {
-    try {
-      setIsPending(true);
-
-      // Cast owner to `0x${string}` for each token config
-      const formattedTokenConfigs = tokenConfigs.map((tc) => ({
-        ...tc,
-        owner: tc.owner as `0x${string}`,
-      }));
-
-      // Format vestingConfigsArray to match contract types
-      const formattedVestingConfigsArray = vestingConfigsArray.map(
-        (vestingConfigs) =>
-          vestingConfigs.map((vc) => ({
-            ...vc,
-            beneficiary: vc.beneficiary as `0x${string}`,
-            cliff: BigInt(vc.cliff),
-            duration: BigInt(vc.duration),
-          }))
-      );
-
-      await writeContract({
-        address: CONTRACT_ADDRESSES.FACTORY as `0x${string}`,
-        abi: TOKEN_VESTING_FACTORY_ABI,
-        functionName: "batchDeployTokens",
-        args: [formattedTokenConfigs, formattedVestingConfigsArray],
-      });
-    } catch (err) {
-      console.error("Batch deployment error:", err);
-      setIsPending(false);
-      throw err;
-    }
-  };
-
-  return {
-    batchDeploy,
-    data: hash,
-    error,
-    isLoading: isPending || isWritePending || isConfirming,
-    isSuccess,
-  };
-}
-
-// Hook for checking if token is deployed by factory
-export function useIsDeployedToken(tokenAddress?: string) {
-  return useReadContract({
-    address: CONTRACT_ADDRESSES.FACTORY as `0x${string}`,
-    abi: TOKEN_VESTING_FACTORY_ABI,
-    functionName: "isDeployedToken",
-    args: tokenAddress ? [tokenAddress as `0x${string}`] : undefined,
-    query: {
-      enabled: !!tokenAddress,
+    isParsingAddresses,
+    reset: () => {
+      setDeploymentResult(null);
+      setDeploymentError(null);
+      setIsParsingAddresses(false);
+      resetWrite();
     },
-  });
-}
-
-// Hook for getting token vesting contracts
-export function useTokenVestingContracts(tokenAddress?: string) {
-  return useReadContract({
-    address: CONTRACT_ADDRESSES.FACTORY as `0x${string}`,
-    abi: TOKEN_VESTING_FACTORY_ABI,
-    functionName: "getTokenVestingContracts",
-    args: tokenAddress ? [tokenAddress as `0x${string}`] : undefined,
-    query: {
-      enabled: !!tokenAddress,
-    },
-  });
+  };
 }
