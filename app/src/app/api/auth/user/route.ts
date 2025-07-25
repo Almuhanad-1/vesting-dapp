@@ -1,6 +1,6 @@
-// src/app/api/auth/user/route.ts (KEEP - NO ETHERS)
+// Supabase + Drizzle auth/user route
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { findUserByAddress, upsertUser } from "@/lib/drizzle/operations";
 import { z } from "zod";
 
 const createUserSchema = z.object({
@@ -19,71 +19,36 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { address } = createUserSchema.parse(body);
 
-    // Try to find existing user
-    let user = await prisma.user.findUnique({
-      where: { address },
-      include: {
-        deployedTokens: {
-          include: {
-            vestingSchedules: {
-              include: {
-                claims: true,
-              },
-            },
-          },
-        },
-        vestingSchedules: {
-          include: {
-            token: true,
-            claims: true,
-          },
-        },
-      },
-    });
-
+    // Get or create user with full relations
+    let user = await findUserByAddress(address);
     let isNewUser = false;
 
-    // If user doesn't exist, create them
     if (!user) {
-      user = await prisma.user.create({
-        data: { address },
-        include: {
-          deployedTokens: {
-            include: {
-              vestingSchedules: {
-                include: {
-                  claims: true,
-                },
-              },
-            },
-          },
-          vestingSchedules: {
-            include: {
-              token: true,
-              claims: true,
-            },
-          },
-        },
-      });
+      await upsertUser(address);
+      user = await findUserByAddress(address);
       isNewUser = true;
+    }
+
+    if (!user) {
+      throw new Error('Failed to create user');
     }
 
     // Calculate user statistics
     const stats = {
-      tokensDeployed: user.deployedTokens.length,
-      totalBeneficiaries: user.deployedTokens.reduce(
-        (sum, token) => sum + token.vestingSchedules.length,
+      tokensDeployed: user.deployedTokens?.length || 0,
+      totalBeneficiaries: user.deployedTokens?.reduce(
+        (sum, token) => sum + (token.vestingSchedules?.length || 0),
         0
-      ),
-      tokensReceiving: user.vestingSchedules.length,
-      totalTokensVested: user.vestingSchedules.reduce(
+      ) || 0,
+      tokensReceiving: user.vestingSchedules?.length || 0,
+      totalTokensVested: user.vestingSchedules?.reduce(
         (sum, schedule) => sum + parseFloat(schedule.totalAmount),
         0
-      ),
-      totalTokensClaimed: user.vestingSchedules.reduce(
+      ) || 0,
+      totalTokensClaimed: user.vestingSchedules?.reduce(
         (sum, schedule) => sum + parseFloat(schedule.releasedAmount || "0"),
         0
-      ),
+      ) || 0,
     };
 
     return NextResponse.json({
@@ -106,10 +71,7 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const { address, ...profileData } = updateUserSchema.parse(body);
 
-    const user = await prisma.user.update({
-      where: { address },
-      data: profileData,
-    });
+    const user = await upsertUser(address, profileData);
 
     return NextResponse.json(user);
   } catch (error) {

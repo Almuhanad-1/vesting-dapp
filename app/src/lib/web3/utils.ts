@@ -1,5 +1,5 @@
-// src/lib/web3/utils.ts
-import { formatEther, parseEther } from "viem";
+// Native utilities - no viem dependency!
+import { formatEther, parseEther, getAddress, shortenAddress } from './native-utils';
 
 export function formatTokenAmount(
   amount: bigint,
@@ -12,9 +12,7 @@ export function parseTokenAmount(amount: string): bigint {
   return parseEther(amount);
 }
 
-export function shortenAddress(address: string, chars = 4): string {
-  return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;
-}
+export { shortenAddress, getAddress };
 
 export function formatDuration(seconds: number): string {
   const days = Math.floor(seconds / (24 * 60 * 60));
@@ -71,7 +69,6 @@ export function calculateVestingProgress(
   };
 }
 
-// Error handling utility
 export function getContractErrorMessage(error: any): string {
   if (error?.message?.includes("user rejected")) {
     return "Transaction was rejected by user";

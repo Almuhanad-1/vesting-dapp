@@ -17,7 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useAccount } from "wagmi";
 import { useDeploymentStore } from "@/store/deployment-store";
 import { useDeployTokenWithVesting } from "@/lib/hooks/useTokenVestingFactory";
-import { parseEther } from "viem";
+import { parseEther } from "@/lib/web3/native-utils";
 import {
   ArrowLeft,
   ArrowRight,
