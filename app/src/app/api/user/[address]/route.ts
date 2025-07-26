@@ -1,6 +1,16 @@
-// src/app/api/user/[address]/route.ts
+// =================================================================
+// 3. app/src/app/api/user/[address]/route.ts - GET USER DATA
+// =================================================================
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/drizzle/client";
+import {
+  users,
+  deployedTokens,
+  vestingSchedules,
+  vestingClaims,
+  batchDeployments,
+} from "@/lib/drizzle/schema";
+import { eq, desc } from "drizzle-orm";
 
 export async function GET(
   request: NextRequest,
@@ -9,32 +19,30 @@ export async function GET(
   try {
     const { address } = params;
 
-    const user = await prisma.user.findUnique({
-      where: { address },
-      include: {
+    const user = await db.query.users.findFirst({
+      where: eq(users.address, address),
+      with: {
         deployedTokens: {
-          include: {
+          with: {
             vestingSchedules: {
-              include: {
+              with: {
                 claims: true,
               },
             },
           },
-          orderBy: { deployedAt: "desc" },
+          orderBy: [desc(deployedTokens.deployedAt)],
         },
         vestingSchedules: {
-          where: {
-            beneficiaryAddress: address,
-          },
-          include: {
+          where: eq(vestingSchedules.beneficiaryAddress, address),
+          with: {
             token: true,
             claims: {
-              orderBy: { claimedAt: "desc" },
+              orderBy: [desc(vestingClaims.claimedAt)],
             },
           },
         },
         batchDeployments: {
-          orderBy: { startedAt: "desc" },
+          orderBy: [desc(batchDeployments.startedAt)],
         },
       },
     });

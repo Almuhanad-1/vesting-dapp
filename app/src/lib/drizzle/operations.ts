@@ -1,20 +1,20 @@
 // Database operations with Drizzle + Supabase
-import { db } from './client';
-import { 
-  users, 
-  deployedTokens, 
-  vestingSchedules, 
+import { db } from "./client";
+import {
+  users,
+  deployedTokens,
+  vestingSchedules,
   vestingClaims,
   batchDeployments,
   type NewUser,
   type NewDeployedToken,
   type NewVestingSchedule,
-  type NewVestingClaim
-} from './schema';
-import { eq, desc, and } from 'drizzle-orm';
+  type NewVestingClaim,
+} from "./schema";
+import { eq, desc, and } from "drizzle-orm";
 
 // User operations
-export async function createUser(data: Omit<NewUser, 'id'>) {
+export async function createUser(data: Omit<NewUser, "id">) {
   const [result] = await db.insert(users).values(data).returning();
   return result;
 }
@@ -49,7 +49,10 @@ export async function findUserByAddress(address: string) {
   });
 }
 
-export async function upsertUser(address: string, updateData?: Partial<Omit<NewUser, 'id' | 'address'>>) {
+export async function upsertUser(
+  address: string,
+  updateData?: Partial<Omit<NewUser, "id" | "address">>
+) {
   // Try to find existing user
   const existingUser = await db.query.users.findFirst({
     where: eq(users.address, address),
@@ -68,9 +71,9 @@ export async function upsertUser(address: string, updateData?: Partial<Omit<NewU
   } else {
     const [created] = await db
       .insert(users)
-      .values({ 
-        address, 
-        ...updateData 
+      .values({
+        address,
+        ...updateData,
       })
       .returning();
     return created;
@@ -78,7 +81,7 @@ export async function upsertUser(address: string, updateData?: Partial<Omit<NewU
 }
 
 // Token operations
-export async function saveDeployedToken(data: Omit<NewDeployedToken, 'id'>) {
+export async function saveDeployedToken(data: Omit<NewDeployedToken, "id">) {
   const [result] = await db.insert(deployedTokens).values(data).returning();
   return result;
 }
@@ -98,12 +101,16 @@ export async function getDeployedTokensByOwner(ownerAddress: string) {
 }
 
 // Vesting operations
-export async function saveVestingSchedule(data: Omit<NewVestingSchedule, 'id'>) {
+export async function saveVestingSchedule(
+  data: Omit<NewVestingSchedule, "id">
+) {
   const [result] = await db.insert(vestingSchedules).values(data).returning();
   return result;
 }
 
-export async function getVestingSchedulesByBeneficiary(beneficiaryAddress: string) {
+export async function getVestingSchedulesByBeneficiary(
+  beneficiaryAddress: string
+) {
   return await db.query.vestingSchedules.findMany({
     where: eq(vestingSchedules.beneficiaryAddress, beneficiaryAddress),
     with: {
@@ -115,7 +122,7 @@ export async function getVestingSchedulesByBeneficiary(beneficiaryAddress: strin
 }
 
 // Claim operations
-export async function recordVestingClaim(data: Omit<NewVestingClaim, 'id'>) {
+export async function recordVestingClaim(data: Omit<NewVestingClaim, "id">) {
   const [result] = await db.insert(vestingClaims).values(data).returning();
   return result;
 }
@@ -140,8 +147,14 @@ export async function getDeploymentAnalytics(ownerAddress?: string) {
   const data = await tokensQuery;
 
   const totalTokens = data.length;
-  const totalSupply = data.reduce((sum, token) => sum + parseFloat(token.totalSupply), 0);
-  const totalVestingSchedules = data.reduce((sum, token) => sum + token.vestingSchedules.length, 0);
+  const totalSupply = data.reduce(
+    (sum, token) => sum + parseFloat(token.totalSupply),
+    0
+  );
+  const totalVestingSchedules = data.reduce(
+    (sum, token) => sum + token.vestingSchedules.length,
+    0
+  );
 
   return {
     totalTokens,
@@ -152,14 +165,16 @@ export async function getDeploymentAnalytics(ownerAddress?: string) {
 }
 
 // Batch operations for better performance with Supabase
-export async function batchCreateVestingSchedules(schedules: Omit<NewVestingSchedule, 'id'>[]) {
+export async function batchCreateVestingSchedules(
+  schedules: Omit<NewVestingSchedule, "id">[]
+) {
   if (schedules.length === 0) return [];
-  
+
   return await db.insert(vestingSchedules).values(schedules).returning();
 }
 
-export async function batchCreateUsers(usersData: Omit<NewUser, 'id'>[]) {
+export async function batchCreateUsers(usersData: Omit<NewUser, "id">[]) {
   if (usersData.length === 0) return [];
-  
+
   return await db.insert(users).values(usersData).returning();
 }

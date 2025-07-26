@@ -1,6 +1,10 @@
-// src/app/api/claim/save/route.ts (NEW - SAVE CLAIM DATA)
+// =================================================================
+// 5. app/src/app/api/claim/save/route.ts - SAVE CLAIM DATA
+// =================================================================
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/drizzle/client";
+import { vestingSchedules, vestingClaims } from "@/lib/drizzle/schema";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 
 const saveClaimSchema = z.object({
@@ -19,11 +23,11 @@ export async function POST(request: NextRequest) {
     const data = saveClaimSchema.parse(body);
 
     // Find the vesting schedule
-    const vestingSchedule = await prisma.vestingSchedule.findFirst({
-      where: {
-        contractAddress: data.vestingContractAddress,
-        beneficiaryAddress: data.beneficiaryAddress,
-      },
+    const vestingSchedule = await db.query.vestingSchedules.findFirst({
+      where: and(
+        eq(vestingSchedules.contractAddress, data.vestingContractAddress),
+        eq(vestingSchedules.beneficiaryAddress, data.beneficiaryAddress)
+      ),
     });
 
     if (!vestingSchedule) {
@@ -34,25 +38,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Record the claim
-    await prisma.vestingClaim.create({
-      data: {
-        vestingScheduleId: vestingSchedule.id,
-        amountClaimed: data.amountClaimed,
-        txHash: data.transactionHash,
-        blockNumber: data.blockNumber,
-        gasUsed: data.gasUsed,
-        gasPrice: data.gasPrice,
-      },
+    await db.insert(vestingClaims).values({
+      vestingScheduleId: vestingSchedule.id,
+      amountClaimed: data.amountClaimed,
+      txHash: data.transactionHash,
+      blockNumber: data.blockNumber,
+      gasUsed: data.gasUsed,
+      gasPrice: data.gasPrice,
     });
 
     // Update released amount
     const currentReleased = parseFloat(vestingSchedule.releasedAmount || "0");
     const newReleased = currentReleased + parseFloat(data.amountClaimed);
 
-    await prisma.vestingSchedule.update({
-      where: { id: vestingSchedule.id },
-      data: { releasedAmount: newReleased.toString() },
-    });
+    await db
+      .update(vestingSchedules)
+      .set({ releasedAmount: newReleased.toString() })
+      .where(eq(vestingSchedules.id, vestingSchedule.id));
 
     return NextResponse.json({
       success: true,

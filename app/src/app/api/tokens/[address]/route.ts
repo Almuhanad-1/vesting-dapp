@@ -1,6 +1,10 @@
-// src/app/api/tokens/[address]/route.ts
+// =================================================================
+// 2. app/src/app/api/tokens/[address]/route.ts - GET TOKEN BY ADDRESS
+// =================================================================
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/drizzle/client";
+import { deployedTokens } from "@/lib/drizzle/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(
   request: NextRequest,
@@ -9,11 +13,11 @@ export async function GET(
   try {
     const { address } = params;
 
-    const token = await prisma.deployedToken.findUnique({
-      where: { address },
-      include: {
+    const token = await db.query.deployedTokens.findFirst({
+      where: eq(deployedTokens.address, address),
+      with: {
         vestingSchedules: {
-          include: {
+          with: {
             claims: true,
           },
         },
