@@ -32,6 +32,7 @@ import {
   useClaimVestedTokens,
   useReleasableAmount,
 } from "@/lib/hooks/useTokenVesting";
+import { useEffect } from "react";
 
 export function VestingSchedulesList() {
   const { data: userData, isLoading } = useUserData();
@@ -67,9 +68,12 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
   const { data: releasableAmount } = useReleasableAmount(
     schedule.contractAddress
   );
-  const { claimTokens, isLoading: isClaiming } = useClaimVestedTokens(
-    schedule.contractAddress
-  );
+  const {
+    claimTokens,
+    isLoading: isClaiming,
+    error,
+    reset,
+  } = useClaimVestedTokens(schedule.contractAddress);
   const { toast } = useToast();
 
   const progress = calculateVestingProgress(
@@ -83,6 +87,21 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
   const vestedAmount = (totalAmount * progress.progressPercentage) / 100;
   const claimableAmount = Math.max(0, vestedAmount - releasedAmount);
 
+  // Handle transaction errors
+  useEffect(() => {
+    if (error) {
+      console.error("Transaction error:", error);
+      toast({
+        title: "Transaction Failed",
+        description:
+          error.message || "The claim transaction failed. Please try again.",
+        variant: "destructive",
+      });
+      // Reset the hook state after showing error
+      reset();
+    }
+  }, [error, toast, reset]);
+
   const handleClaim = async () => {
     if (claimableAmount <= 0) {
       toast({
@@ -94,17 +113,14 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
     }
 
     try {
-      claimTokens();
+      await claimTokens(); // ✅ AWAIT the async function
       toast({
         title: "Claim initiated",
         description: "Your token claim transaction has been submitted.",
       });
     } catch (error) {
-      toast({
-        title: "Claim failed",
-        description: "Failed to claim tokens. Please try again.",
-        variant: "destructive",
-      });
+      // Error handling is now done in useEffect above
+      console.error("Claim error:", error);
     }
   };
 
@@ -223,7 +239,7 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
         <div className="flex items-center gap-3">
           <Button
             onClick={handleClaim}
-            disabled={claimableAmount <= 0 || isClaiming || schedule.revoked}
+            disabled={claimableAmount <= 0 || isClaiming}
             className="flex items-center gap-2"
           >
             <Gift className="h-4 w-4" />
