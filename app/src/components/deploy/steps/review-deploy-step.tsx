@@ -1,7 +1,9 @@
-// src/components/deploy/steps/review-deploy-step.tsx (FIXED VERSION)
+// src/components/deploy/steps/review-deploy-step.tsx - UPDATED to pass data to backend
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState } from "react";
+import { useAccount } from "wagmi";
+import { parseEther } from "viem";
 import {
   Card,
   CardContent,
@@ -10,42 +12,37 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useAccount } from "wagmi";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useToast } from "@/lib/hooks/use-toast";
 import { useDeploymentStore } from "@/store/deployment-store";
 import { useDeployTokenWithVesting } from "@/lib/hooks/useTokenVestingFactory";
-import { parseEther } from "@/lib/web3/native-utils";
 import {
-  ArrowLeft,
-  ArrowRight,
   CheckCircle,
   AlertTriangle,
-  Coins,
-  Users,
-  Clock,
   Shield,
   Loader2,
-  FileText,
-  Calculator,
+  ArrowLeft,
+  Users,
+  Coins,
+  Clock,
 } from "lucide-react";
-import { useToast } from "@/lib/hooks/use-toast";
 
-interface ReviewAndDeployStepProps {
+interface ReviewDeployStepProps {
   onNext: () => void;
   onPrevious: () => void;
 }
 
-export function ReviewAndDeployStep({
+export function ReviewDeployStep({
   onNext,
   onPrevious,
-}: ReviewAndDeployStepProps) {
+}: ReviewDeployStepProps) {
+  const [confirmedDetails, setConfirmedDetails] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+
   const { address } = useAccount();
   const { toast } = useToast();
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [confirmedDetails, setConfirmedDetails] = useState(false);
 
   const {
     tokenConfig,
@@ -56,36 +53,24 @@ export function ReviewAndDeployStep({
     setDeploymentError,
   } = useDeploymentStore();
 
-  // Use the FIXED hook with real address parsing
   const {
     deployToken,
     deploymentResult,
+    deploymentError,
     isLoading,
-    isParsingAddresses,
-    error,
     isSuccess,
-    reset: resetDeployment,
+    isParsingAddresses,
+    isSavingToDatabase,
   } = useDeployTokenWithVesting();
 
-  // Calculate totals and validation
-  const totalAllocation = beneficiaries.reduce(
+  // Calculate total allocation
+  const totalAllocated = beneficiaries.reduce(
     (sum, beneficiary) => sum + parseFloat(beneficiary.amount),
     0
   );
-
   const totalSupply = parseFloat(tokenConfig?.totalSupply || "0");
   const allocationPercentage =
-    totalSupply > 0 ? (totalAllocation / totalSupply) * 100 : 0;
-
-  const categoryBreakdown = beneficiaries.reduce((acc, beneficiary) => {
-    const category = beneficiary.category;
-    if (!acc[category]) {
-      acc[category] = { count: 0, amount: 0 };
-    }
-    acc[category].count += 1;
-    acc[category].amount += parseFloat(beneficiary.amount);
-    return acc;
-  }, {} as Record<string, { count: number; amount: number }>);
+    totalSupply > 0 ? (totalAllocated / totalSupply) * 100 : 0;
 
   // Validation checks
   const validationChecks = [
@@ -140,13 +125,12 @@ export function ReviewAndDeployStep({
     confirmedDetails &&
     !isLoading;
 
-  // FIXED: Real deployment function
+  // UPDATED: Deploy function with backend integration
   const handleDeploy = async () => {
     if (!canDeploy || !tokenConfig || !address) return;
 
     try {
       setDeploying(true);
-      resetDeployment();
 
       // Prepare contract parameters
       const tokenParams = {
@@ -171,8 +155,13 @@ export function ReviewAndDeployStep({
 
       console.log("Deploying contracts...", { tokenParams, vestingParams });
 
-      // Deploy to blockchain - this will now parse REAL addresses
-      await deployToken(tokenParams, vestingParams);
+      // Deploy to blockchain - this will now also save to backend
+      await deployToken(
+        tokenParams,
+        vestingParams,
+        vestingSchedules, // Pass for backend save
+        beneficiaries // Pass for backend save
+      );
 
       toast({
         title: "Deployment initiated",
@@ -194,99 +183,131 @@ export function ReviewAndDeployStep({
     }
   };
 
-  // FIXED: Handle successful deployment with REAL addresses
-  useEffect(() => {
-    if (isSuccess && deploymentResult) {
-      console.log(
-        "Deployment successful with real addresses:",
-        deploymentResult
-      );
+  // Handle successful deployment
+  if (isSuccess && deploymentResult) {
+    setDeploymentResult({
+      tokenAddress: deploymentResult.tokenAddress,
+      vestingContracts: deploymentResult.vestingContracts,
+      transactionHash: deploymentResult.transactionHash,
+      deployedAt: deploymentResult.deployedAt,
+      databaseSaved: deploymentResult.databaseSaved,
+    });
+    onNext();
+    return null;
+  }
 
-      // Save the REAL deployment result
-      setDeploymentResult({
-        tokenAddress: deploymentResult.tokenAddress,
-        vestingContracts: deploymentResult.vestingContracts,
-        transactionHash: deploymentResult.transactionHash,
-        deployedAt: new Date(),
-      });
-
-      setDeploying(false);
-
-      toast({
-        title: "Deployment completed!",
-        description:
-          "Your token has been deployed successfully with real contract addresses.",
-      });
-
-      onNext();
-    }
-  }, [
-    isSuccess,
-    deploymentResult,
-    setDeploymentResult,
-    setDeploying,
-    onNext,
-    toast,
-  ]);
-
-  // Handle errors
-  useEffect(() => {
-    if (error) {
-      console.error("Deployment error:", error);
-      setDeploymentError(error);
-      setDeploying(false);
-    }
-  }, [error, setDeploymentError, setDeploying]);
-
-  const getStatusMessage = () => {
-    if (isParsingAddresses) return "Parsing contract addresses...";
-    if (isLoading) return "Deploying to blockchain...";
-    return "Ready to deploy";
-  };
+  const error = deploymentError;
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
+            <Shield className="h-6 w-6" />
             Review & Deploy
           </CardTitle>
           <CardDescription>
-            Review your configuration and deploy your token with vesting
-            contracts
+            Please review your configuration before deploying to the blockchain.
+            This action cannot be undone.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Status Display */}
-          {(isLoading || isParsingAddresses) && (
-            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-              <div>
-                <div className="font-medium text-blue-800">
-                  {getStatusMessage()}
+          {/* Token Configuration Summary */}
+          <div className="space-y-4">
+            <h3 className="font-semibold flex items-center gap-2">
+              <Coins className="h-5 w-5" />
+              Token Configuration
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div>
+                  <span className="text-sm text-muted-foreground">Name:</span>
+                  <div className="font-medium">{tokenConfig?.name}</div>
                 </div>
-                <div className="text-sm text-blue-600">
-                  {isParsingAddresses
-                    ? "Extracting contract addresses from blockchain..."
-                    : "Please wait for transaction confirmation..."}
+                <div>
+                  <span className="text-sm text-muted-foreground">Symbol:</span>
+                  <div className="font-medium">{tokenConfig?.symbol}</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <span className="text-sm text-muted-foreground">
+                    Total Supply:
+                  </span>
+                  <div className="font-medium">
+                    {tokenConfig?.totalSupply
+                      ? Number(tokenConfig.totalSupply).toLocaleString()
+                      : "0"}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-sm text-muted-foreground">
+                    Decimals:
+                  </span>
+                  <div className="font-medium">
+                    {tokenConfig?.decimals || 18}
+                  </div>
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
-          {/* Rest of your existing validation checks and UI */}
-          {/* Validation Checks */}
-          <div className="space-y-3">
+          {/* Vesting Schedules Summary */}
+          <div className="space-y-4">
             <h3 className="font-semibold flex items-center gap-2">
-              <CheckCircle className="h-5 w-5" />
-              Pre-deployment Validation
+              <Clock className="h-5 w-5" />
+              Vesting Schedules ({vestingSchedules.length})
             </h3>
             <div className="space-y-2">
+              {vestingSchedules.map((schedule) => (
+                <div
+                  key={schedule.id}
+                  className="flex items-center justify-between p-3 bg-muted rounded-lg"
+                >
+                  <div>
+                    <div className="font-medium">{schedule.category}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {schedule.cliffMonths}m cliff + {schedule.vestingMonths}m
+                      vesting
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {schedule.revocable && (
+                      <Badge variant="secondary" className="text-xs">
+                        Revocable
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Beneficiaries Summary */}
+          <div className="space-y-4">
+            <h3 className="font-semibold flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Beneficiaries ({beneficiaries.length})
+            </h3>
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">
+                {totalAllocated.toLocaleString()}
+              </div>
+              <div className="text-sm text-blue-800">
+                Total Tokens Allocated ({allocationPercentage.toFixed(1)}% of
+                supply)
+              </div>
+            </div>
+          </div>
+
+          {/* Validation Checks */}
+          <div className="space-y-4">
+            <h3 className="font-semibold">Pre-deployment Validation</h3>
+            <div className="space-y-3">
               {validationChecks.map((check) => (
                 <div
                   key={check.id}
-                  className="flex items-center justify-between p-3 bg-muted rounded-lg"
+                  className="flex items-center justify-between"
                 >
                   <div className="flex items-center gap-3">
                     {check.passed ? (
@@ -364,7 +385,11 @@ export function ReviewAndDeployStep({
           {isLoading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              {isParsingAddresses ? "Parsing Addresses..." : "Deploying..."}
+              {isParsingAddresses
+                ? "Parsing Addresses..."
+                : isSavingToDatabase
+                ? "Saving to Database..."
+                : "Deploying..."}
             </>
           ) : (
             <>

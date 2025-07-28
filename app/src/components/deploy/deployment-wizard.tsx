@@ -1,4 +1,4 @@
-// src/components/deploy/deployment-wizard.tsx
+// src/components/deploy/deployment-wizard.tsx - FIXED IMPORTS
 "use client";
 
 import { useState } from "react";
@@ -16,9 +16,10 @@ import { ArrowLeft, ArrowRight, CheckCircle } from "lucide-react";
 import { TokenConfigurationStep } from "./steps/token-configuration-step";
 import { VestingSchedulesStep } from "./steps/vesting-schedules-step";
 import { BeneficiariesStep } from "./steps/beneficiaries-step";
-import { ReviewAndDeployStep } from "./steps/review-deploy-step";
+import { ReviewDeployStep } from "./steps/review-deploy-step"; // FIXED: Removed "And"
 import { DeploymentSuccessStep } from "./steps/deployment-success-step";
 import { useDeploymentStore } from "@/store/deployment-store";
+import { useDeployTokenWithVesting } from "@/lib/hooks/useTokenVestingFactory"; // Add this import
 
 const STEPS = [
   {
@@ -50,7 +51,11 @@ const STEPS = [
 
 export function DeploymentWizard() {
   const [currentStep, setCurrentStep] = useState(0);
-  const { resetDeployment, isDeploymentComplete } = useDeploymentStore();
+  const { resetDeployment, isDeploymentComplete, deploymentResult } =
+    useDeploymentStore();
+
+  // Import the hook for retry functionality
+  const { retryDatabaseSave, isSavingToDatabase } = useDeployTokenWithVesting();
 
   const handleNext = () => {
     if (currentStep < STEPS.length - 1) {
@@ -88,13 +93,20 @@ export function DeploymentWizard() {
         );
       case 3:
         return (
-          <ReviewAndDeployStep
+          <ReviewDeployStep // FIXED: Changed from ReviewAndDeployStep
             onNext={handleNext}
             onPrevious={handlePrevious}
           />
         );
       case 4:
-        return <DeploymentSuccessStep onReset={handleReset} />;
+        return (
+          <DeploymentSuccessStep
+            deploymentResult={deploymentResult}
+            onReset={handleReset}
+            retryDatabaseSave={retryDatabaseSave}
+            isSavingToDatabase={isSavingToDatabase}
+          />
+        );
       default:
         return null;
     }

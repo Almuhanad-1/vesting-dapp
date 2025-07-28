@@ -1,7 +1,7 @@
-// src/components/deploy/steps/deployment-success-step.tsx (UPDATED VERSION)
+// src/components/deploy/steps/deployment-success-step.tsx - UPDATED with backend integration
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Card,
   CardContent,
@@ -12,47 +12,38 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { useDeploymentStore } from "@/store/deployment-store";
-import { shortenAddress } from "@/lib/web3/utils";
+import { useToast } from "@/lib/hooks/use-toast";
 import {
   CheckCircle,
-  ExternalLink,
   Copy,
-  Download,
-  Share2,
-  BarChart3,
+  ExternalLink,
   Users,
-  RefreshCcw,
-  Sparkles,
+  Clock,
   AlertCircle,
-  Eye,
+  RefreshCw,
+  Database,
+  Coins,
+  Download,
 } from "lucide-react";
-import { useToast } from "@/lib/hooks/use-toast";
-import Link from "next/link";
-import confetti from "canvas-confetti";
+import { useDeploymentStore } from "@/store/deployment-store";
+import type { DeploymentResult } from "@/lib/hooks/useTokenVestingFactory";
 
 interface DeploymentSuccessStepProps {
+  deploymentResult: DeploymentResult | null;
   onReset: () => void;
+  retryDatabaseSave?: () => Promise<void>;
+  isSavingToDatabase?: boolean;
 }
 
-export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
-  const { deploymentResult, tokenConfig, vestingSchedules, beneficiaries } =
-    useDeploymentStore();
+export function DeploymentSuccessStep({
+  deploymentResult,
+  onReset,
+  retryDatabaseSave,
+  isSavingToDatabase = false,
+}: DeploymentSuccessStepProps) {
+  const { tokenConfig, vestingSchedules, beneficiaries } = useDeploymentStore();
   const { toast } = useToast();
   const [copied, setCopied] = useState<string | null>(null);
-
-  // Trigger confetti on component mount
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-      });
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -79,6 +70,7 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
         transactionHash: deploymentResult?.transactionHash,
         tokenAddress: deploymentResult?.tokenAddress,
         vestingContracts: deploymentResult?.vestingContracts,
+        databaseSaved: deploymentResult?.databaseSaved,
       },
       token: {
         name: tokenConfig?.name,
@@ -143,7 +135,6 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
     );
   }
 
-  // You can configure this based on your network
   const explorerBaseUrl =
     process.env.NEXT_PUBLIC_CHAIN_ID === "1"
       ? "https://etherscan.io"
@@ -151,89 +142,152 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
 
   return (
     <div className="space-y-6">
-      {/* Success Header */}
-      <Card className="border-green-200 bg-green-50">
-        <CardContent className="p-8 text-center">
-          <div className="flex justify-center mb-4">
-            <div className="relative">
-              <CheckCircle className="h-16 w-16 text-green-500" />
-              <Sparkles className="h-6 w-6 text-yellow-500 absolute -top-1 -right-1 animate-pulse" />
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold text-green-800 mb-2">
-            🎉 Deployment Successful!
-          </h2>
-          <p className="text-green-700">
-            Your token and vesting contracts have been deployed successfully to
-            the blockchain.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Address Verification Alert */}
-      {(!hasValidTokenAddress || !hasValidVestingContracts) && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="h-5 w-5 text-yellow-600" />
-              <div>
-                <h3 className="font-medium text-yellow-800">
-                  Contract Addresses Being Processed
-                </h3>
-                <p className="text-sm text-yellow-700">
-                  Contract addresses are still being extracted from the
-                  blockchain. Check the transaction hash for details, or refresh
-                  the page in a moment.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Deployment Details */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CheckCircle className="h-5 w-5 text-green-500" />
-            Deployment Details
+            <CheckCircle className="h-6 w-6 text-green-500" />
+            Deployment{" "}
+            {deploymentResult.databaseSaved ? "Complete" : "Partially Complete"}
           </CardTitle>
           <CardDescription>
-            Your token deployment information and contract addresses
+            {deploymentResult.databaseSaved
+              ? "Your token and vesting contracts have been deployed successfully and saved to the database."
+              : "Your token has been deployed to the blockchain, but there was an issue saving to the database."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Token Information */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-lg">
-                {tokenConfig?.name} ({tokenConfig?.symbol})
-              </h3>
-              <Badge variant="outline">ERC-20 Token</Badge>
+          {/* Database Status */}
+          <div className="flex items-center justify-between p-4 rounded-lg border">
+            <div className="flex items-center gap-3">
+              <Database
+                className={`h-5 w-5 ${
+                  deploymentResult.databaseSaved
+                    ? "text-green-500"
+                    : "text-red-500"
+                }`}
+              />
+              <div>
+                <div className="font-medium">Database Status</div>
+                <div className="text-sm text-muted-foreground">
+                  {deploymentResult.databaseSaved
+                    ? "Deployment data saved successfully"
+                    : "Failed to save deployment data"}
+                </div>
+              </div>
             </div>
+            <div className="flex items-center gap-2">
+              {deploymentResult.databaseSaved ? (
+                <Badge
+                  variant="default"
+                  className="bg-green-100 text-green-800"
+                >
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Saved
+                </Badge>
+              ) : (
+                <>
+                  <Badge variant="destructive">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    Failed
+                  </Badge>
+                  {retryDatabaseSave && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={retryDatabaseSave}
+                      disabled={isSavingToDatabase}
+                    >
+                      {isSavingToDatabase ? (
+                        <>
+                          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Retry Save
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                {/* Token Address */}
+          {/* Token Contract */}
+          <div className="space-y-4">
+            <h3 className="font-semibold flex items-center gap-2">
+              <Coins className="h-5 w-5" />
+              Token Contract
+            </h3>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-muted p-3 rounded-lg">
                   <div className="text-sm text-muted-foreground">
                     Token Address
                   </div>
                   {hasValidTokenAddress ? (
-                    <div className="flex items-center gap-2">
-                      <code className="font-mono text-sm">
-                        {shortenAddress(deploymentResult.tokenAddress)}
+                    <div className="flex items-center justify-between">
+                      <code className="text-sm bg-background px-2 py-1 rounded">
+                        {deploymentResult.tokenAddress}
                       </code>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() =>
+                            copyToClipboard(
+                              deploymentResult.tokenAddress,
+                              "Token Address"
+                            )
+                          }
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          asChild
+                          className="h-6 w-6 p-0"
+                        >
+                          <a
+                            href={`${explorerBaseUrl}/token/${deploymentResult.tokenAddress}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-yellow-600">Address pending...</div>
+                  )}
+                </div>
+
+                <div className="bg-muted p-3 rounded-lg">
+                  <div className="text-sm text-muted-foreground">
+                    Transaction Hash
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <code className="text-sm bg-background px-2 py-1 rounded">
+                      {deploymentResult.transactionHash.slice(0, 10)}...
+                      {deploymentResult.transactionHash.slice(-8)}
+                    </code>
+                    <div className="flex gap-1">
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-6 w-6 p-0"
                         onClick={() =>
                           copyToClipboard(
-                            deploymentResult.tokenAddress,
-                            "Token address"
+                            deploymentResult.transactionHash,
+                            "Transaction Hash"
                           )
                         }
-                        className="h-6 w-6 p-0"
                       >
                         <Copy className="h-3 w-3" />
                       </Button>
@@ -244,7 +298,7 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
                         className="h-6 w-6 p-0"
                       >
                         <a
-                          href={`${explorerBaseUrl}/address/${deploymentResult.tokenAddress}`}
+                          href={`${explorerBaseUrl}/tx/${deploymentResult.transactionHash}`}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
@@ -252,65 +306,6 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
                         </a>
                       </Button>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-yellow-600">
-                      <Eye className="h-4 w-4" />
-                      <span className="text-sm">
-                        Address being extracted...
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="text-sm text-muted-foreground">
-                    Total Supply
-                  </div>
-                  <div className="font-medium">
-                    {parseFloat(
-                      tokenConfig?.totalSupply || "0"
-                    ).toLocaleString()}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {/* Transaction Hash */}
-                <div className="bg-muted p-3 rounded-lg">
-                  <div className="text-sm text-muted-foreground">
-                    Transaction Hash
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <code className="font-mono text-sm">
-                      {shortenAddress(deploymentResult.transactionHash)}
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        copyToClipboard(
-                          deploymentResult.transactionHash,
-                          "Transaction hash"
-                        )
-                      }
-                      className="h-6 w-6 p-0"
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      asChild
-                      className="h-6 w-6 p-0"
-                    >
-                      <a
-                        href={`${explorerBaseUrl}/tx/${deploymentResult.transactionHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </Button>
                   </div>
                 </div>
 
@@ -320,6 +315,15 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
                   </div>
                   <div className="font-medium">
                     {new Date(deploymentResult.deployedAt).toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="bg-muted p-3 rounded-lg">
+                  <div className="text-sm text-muted-foreground">
+                    Token Details
+                  </div>
+                  <div className="font-medium">
+                    {tokenConfig?.name} ({tokenConfig?.symbol})
                   </div>
                 </div>
               </div>
@@ -335,6 +339,7 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
               Vesting Contracts (
               {deploymentResult.vestingContracts?.length || 0})
             </h3>
+
             {deploymentResult.vestingContracts?.length ? (
               <div className="space-y-2">
                 {deploymentResult.vestingContracts.map(
@@ -348,39 +353,42 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
                           Vesting Contract #{index + 1}
                         </div>
                         {isValidAddress(contractAddress) ? (
-                          <code className="text-sm text-muted-foreground">
+                          <code className="text-xs text-muted-foreground">
                             {contractAddress}
                           </code>
                         ) : (
-                          <div className="flex items-center gap-2 text-yellow-600">
-                            <Eye className="h-3 w-3" />
-                            <span className="text-xs">
-                              Address being extracted...
-                            </span>
-                          </div>
+                          <span className="text-xs text-yellow-600">
+                            Address pending...
+                          </span>
                         )}
                       </div>
                       {isValidAddress(contractAddress) && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex gap-1">
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="h-6 w-6 p-0"
                             onClick={() =>
                               copyToClipboard(
                                 contractAddress,
-                                `Vesting contract #${index + 1}`
+                                `Vesting Contract ${index + 1}`
                               )
                             }
                           >
-                            <Copy className="h-4 w-4" />
+                            <Copy className="h-3 w-3" />
                           </Button>
-                          <Button variant="ghost" size="sm" asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            asChild
+                            className="h-6 w-6 p-0"
+                          >
                             <a
                               href={`${explorerBaseUrl}/address/${contractAddress}`}
                               target="_blank"
                               rel="noopener noreferrer"
                             >
-                              <ExternalLink className="h-4 w-4" />
+                              <ExternalLink className="h-3 w-3" />
                             </a>
                           </Button>
                         </div>
@@ -421,120 +429,57 @@ export function DeploymentSuccessStep({ onReset }: DeploymentSuccessStepProps) {
             </div>
             <div className="text-center p-4 bg-purple-50 rounded-lg">
               <div className="text-2xl font-bold text-purple-600">
-                {beneficiaries
-                  .reduce((sum, b) => sum + parseFloat(b.amount), 0)
-                  .toLocaleString()}
+                {tokenConfig?.totalSupply
+                  ? Number(tokenConfig.totalSupply).toLocaleString()
+                  : "0"}
               </div>
-              <div className="text-sm text-purple-800">Tokens Allocated</div>
+              <div className="text-sm text-purple-800">Total Supply</div>
             </div>
             <div className="text-center p-4 bg-orange-50 rounded-lg">
               <div className="text-2xl font-bold text-orange-600">
-                {(
-                  (beneficiaries.reduce(
-                    (sum, b) => sum + parseFloat(b.amount),
-                    0
-                  ) /
-                    parseFloat(tokenConfig?.totalSupply || "1")) *
-                  100
-                ).toFixed(1)}
-                %
+                {deploymentResult.databaseSaved ? "100%" : "50%"}
               </div>
-              <div className="text-sm text-orange-800">Supply Allocated</div>
+              <div className="text-sm text-orange-800">Completion</div>
             </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-3 pt-4">
+            <Button
+              onClick={exportDeploymentData}
+              variant="outline"
+              className="flex-1"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export Data
+            </Button>
+
+            {!deploymentResult.databaseSaved && retryDatabaseSave && (
+              <Button
+                onClick={retryDatabaseSave}
+                disabled={isSavingToDatabase}
+                className="flex-1"
+              >
+                {isSavingToDatabase ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Saving to Database...
+                  </>
+                ) : (
+                  <>
+                    <Database className="h-4 w-4 mr-2" />
+                    Retry Database Save
+                  </>
+                )}
+              </Button>
+            )}
+
+            <Button onClick={onReset} variant="outline" className="flex-1">
+              Deploy Another Token
+            </Button>
           </div>
         </CardContent>
       </Card>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* View Transaction (Always works) */}
-        <Button variant="outline" asChild className="flex items-center gap-2">
-          <a
-            href={`${explorerBaseUrl}/tx/${deploymentResult.transactionHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <ExternalLink className="h-4 w-4" />
-            View Transaction
-          </a>
-        </Button>
-
-        {/* View Token (Only if valid address) */}
-        {hasValidTokenAddress ? (
-          <Button variant="outline" asChild className="flex items-center gap-2">
-            <a
-              href={`${explorerBaseUrl}/address/${deploymentResult.tokenAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink className="h-4 w-4" />
-              View Token
-            </a>
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            disabled
-            className="flex items-center gap-2"
-          >
-            <Eye className="h-4 w-4" />
-            Token Pending
-          </Button>
-        )}
-
-        {/* Copy Address (Only if valid) */}
-        {hasValidTokenAddress ? (
-          <Button
-            variant="outline"
-            onClick={() =>
-              copyToClipboard(deploymentResult.tokenAddress, "Token address")
-            }
-            className="flex items-center gap-2"
-          >
-            <Copy className="h-4 w-4" />
-            {copied === "Token address" ? "Copied!" : "Copy Address"}
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            disabled
-            className="flex items-center gap-2"
-          >
-            <Copy className="h-4 w-4" />
-            Address Pending
-          </Button>
-        )}
-
-        <Button
-          onClick={exportDeploymentData}
-          className="flex items-center gap-2"
-        >
-          <Download className="h-4 w-4" />
-          Export Data
-        </Button>
-      </div>
-
-      {/* Success Message */}
-      <div className="text-center p-6 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
-        <h3 className="text-lg font-semibold text-green-800 mb-2">
-          🚀 Congratulations on your successful deployment!
-        </h3>
-        <p className="text-green-700 mb-4">
-          Your token and vesting contracts are now live on the blockchain.
-          Contract addresses will be fully available once the transaction is
-          completely processed.
-        </p>
-        <div className="flex justify-center gap-3">
-          <Button variant="outline" onClick={exportDeploymentData}>
-            <Download className="h-4 w-4 mr-2" />
-            Save Deployment Info
-          </Button>
-          <Button onClick={onReset}>
-            <RefreshCcw className="h-4 w-4 mr-2" />
-            Deploy Another Token
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

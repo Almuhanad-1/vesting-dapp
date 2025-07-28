@@ -1,4 +1,4 @@
-// src/store/deployment-store.ts
+// src/store/deployment-store.ts - UPDATED with matching DeploymentResult interface
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -30,11 +30,13 @@ export interface Beneficiary {
   email?: string;
 }
 
+// UPDATED: Match the hook's DeploymentResult interface
 export interface DeploymentResult {
   tokenAddress: string;
   vestingContracts: string[];
   transactionHash: string;
   deployedAt: Date;
+  databaseSaved: boolean; // ADD this property to match the hook
 }
 
 interface DeploymentState {

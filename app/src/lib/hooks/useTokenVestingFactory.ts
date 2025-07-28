@@ -1,15 +1,17 @@
-// src/hooks/useTokenVestingFactory.ts
+// src/lib/hooks/useTokenVestingFactory.ts - FIXED to prevent double API calls
 import {
   useWriteContract,
   useWaitForTransactionReceipt,
   usePublicClient,
+  useAccount,
 } from "wagmi";
 import {
   CONTRACT_ADDRESSES,
   TOKEN_VESTING_FACTORY_ABI,
 } from "@/lib/web3/config";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { waitForDeploymentAndParse } from "@/lib/web3/transaction-parser";
+import { useToast } from "@/lib/hooks/use-toast";
 
 export interface TokenConfig {
   name: string;
@@ -30,16 +32,25 @@ export interface DeploymentResult {
   tokenAddress: string;
   vestingContracts: string[];
   transactionHash: string;
+  deployedAt: Date;
+  databaseSaved: boolean;
 }
 
-// Hook for deploying token with vesting
+// Hook for deploying token with vesting + backend integration
 export function useDeployTokenWithVesting() {
   const [deploymentResult, setDeploymentResult] =
     useState<DeploymentResult | null>(null);
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [isParsingAddresses, setIsParsingAddresses] = useState(false);
+  const [isSavingToDatabase, setIsSavingToDatabase] = useState(false);
+
+  // CRITICAL: Use ref to prevent double database saves
+  const databaseSaveAttempted = useRef(false);
+  const currentTransactionHash = useRef<string | null>(null);
 
   const publicClient = usePublicClient();
+  const { address } = useAccount();
+  const { toast } = useToast();
 
   const {
     writeContract,
@@ -57,29 +68,126 @@ export function useDeployTokenWithVesting() {
     hash,
   });
 
-  // Parse transaction when it's successful
+  // Store deployment params for backend save
+  const [deploymentParams, setDeploymentParams] = useState<{
+    tokenConfig: any;
+    vestingSchedules: any[];
+    beneficiaries: any[];
+  } | null>(null);
+
+  // Parse transaction and save to backend when successful
   useEffect(() => {
-    async function parseTransaction() {
-      if (isTxSuccess && hash && publicClient && !isParsingAddresses) {
+    async function parseAndSaveDeployment() {
+      if (
+        isTxSuccess &&
+        hash &&
+        publicClient &&
+        !isParsingAddresses &&
+        deploymentParams
+      ) {
+        // PREVENT DOUBLE EXECUTION - Check if we already processed this transaction
+        if (
+          databaseSaveAttempted.current &&
+          currentTransactionHash.current === hash
+        ) {
+          console.log(
+            "Database save already attempted for this transaction, skipping"
+          );
+          return;
+        }
+
         try {
+          // Mark that we're processing this transaction
+          databaseSaveAttempted.current = true;
+          currentTransactionHash.current = hash;
+
           setIsParsingAddresses(true);
           console.log(
             "Transaction successful, parsing contract addresses...",
             hash
           );
 
-          // Parse the real addresses from the transaction
+          // 1. Parse the real addresses from the transaction
           const addresses = await waitForDeploymentAndParse(publicClient, hash);
-
           console.log("Successfully parsed addresses:", addresses);
 
-          setDeploymentResult({
+          const preliminaryResult: DeploymentResult = {
             tokenAddress: addresses.tokenAddress,
             vestingContracts: addresses.vestingContracts,
             transactionHash: hash,
-          });
+            deployedAt: new Date(),
+            databaseSaved: false,
+          };
 
-          setDeploymentError(null);
+          // 2. Save to backend database
+          setIsSavingToDatabase(true);
+
+          try {
+            console.log("Attempting database save (first time)...");
+            const response = await fetch("/api/deployment/save", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                userAddress: address,
+                tokenAddress: addresses.tokenAddress,
+                transactionHash: hash,
+                tokenConfig: deploymentParams.tokenConfig,
+                vestingSchedules: deploymentParams.vestingSchedules,
+                beneficiaries: deploymentParams.beneficiaries,
+                vestingContracts: addresses.vestingContracts,
+              }),
+            });
+
+            const saveResult = await response.json();
+
+            if (!response.ok) {
+              console.error("Database save failed:", saveResult);
+              throw new Error(
+                saveResult.details || "Failed to save to database"
+              );
+            }
+
+            console.log("Successfully saved to database:", saveResult);
+
+            // 3. Set final result with database confirmation
+            setDeploymentResult({
+              ...preliminaryResult,
+              databaseSaved: true,
+            });
+
+            toast({
+              title: "Deployment Complete",
+              description: "Token deployed and data saved successfully!",
+            });
+          } catch (backendError) {
+            console.error("Failed to save to database:", backendError);
+
+            // Still set deployment result, but mark database as failed
+            setDeploymentResult({
+              ...preliminaryResult,
+              databaseSaved: false,
+            });
+
+            toast({
+              title: "Partial Success",
+              description:
+                "Token deployed but failed to save to database. You can retry saving later.",
+              variant: "destructive",
+            });
+
+            // Set specific error for database save failure
+            setDeploymentError(
+              `Database save failed: ${
+                backendError instanceof Error
+                  ? backendError.message
+                  : "Unknown error"
+              }`
+            );
+          }
+
+          setIsSavingToDatabase(false);
           setIsParsingAddresses(false);
         } catch (error) {
           console.error("Failed to parse deployment addresses:", error);
@@ -89,20 +197,30 @@ export function useDeployTokenWithVesting() {
             }`
           );
           setIsParsingAddresses(false);
+          setIsSavingToDatabase(false);
 
           // Set a fallback result with the transaction hash
-          // so users can at least see the transaction
           setDeploymentResult({
-            tokenAddress: "", // Empty but won't show broken links
+            tokenAddress: "",
             vestingContracts: [],
             transactionHash: hash,
+            deployedAt: new Date(),
+            databaseSaved: false,
           });
         }
       }
     }
 
-    parseTransaction();
-  }, [isTxSuccess, hash, publicClient, isParsingAddresses]);
+    parseAndSaveDeployment();
+  }, [
+    isTxSuccess,
+    hash,
+    publicClient,
+    isParsingAddresses,
+    deploymentParams,
+    address,
+    toast,
+  ]);
 
   // Handle errors
   useEffect(() => {
@@ -120,14 +238,34 @@ export function useDeployTokenWithVesting() {
 
   const deployToken = async (
     tokenConfig: TokenConfig,
-    vestingConfigs: VestingConfig[]
+    vestingConfigs: VestingConfig[],
+    vestingSchedules: any[], // For backend save
+    beneficiaries: any[] // For backend save
   ) => {
     try {
-      // Reset previous state
+      // Reset previous state AND flags
       setDeploymentResult(null);
       setDeploymentError(null);
       setIsParsingAddresses(false);
+      setIsSavingToDatabase(false);
+
+      // RESET the prevention flags for new deployment
+      databaseSaveAttempted.current = false;
+      currentTransactionHash.current = null;
+
       resetWrite();
+
+      // Store params for later backend save
+      setDeploymentParams({
+        tokenConfig: {
+          name: tokenConfig.name,
+          symbol: tokenConfig.symbol,
+          totalSupply: tokenConfig.totalSupply.toString(),
+          decimals: 18,
+        },
+        vestingSchedules,
+        beneficiaries,
+      });
 
       // Validate inputs
       if (
@@ -177,21 +315,86 @@ export function useDeployTokenWithVesting() {
     }
   };
 
-  const isLoading = isWritePending || isConfirming || isParsingAddresses;
-  const isSuccess = isTxSuccess && !!deploymentResult && !isParsingAddresses;
+  // Add retry function for database save
+  const retryDatabaseSave = async () => {
+    if (
+      !deploymentResult ||
+      !deploymentParams ||
+      deploymentResult.databaseSaved
+    ) {
+      return;
+    }
+
+    setIsSavingToDatabase(true);
+    try {
+      console.log("Retrying database save...");
+      const response = await fetch("/api/deployment/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userAddress: address,
+          tokenAddress: deploymentResult.tokenAddress,
+          transactionHash: deploymentResult.transactionHash,
+          tokenConfig: deploymentParams.tokenConfig,
+          vestingSchedules: deploymentParams.vestingSchedules,
+          beneficiaries: deploymentParams.beneficiaries,
+          vestingContracts: deploymentResult.vestingContracts,
+        }),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(responseData.details || "Failed to save to database");
+      }
+
+      // Update deployment result
+      setDeploymentResult({
+        ...deploymentResult,
+        databaseSaved: true,
+      });
+
+      setDeploymentError(null);
+
+      toast({
+        title: "Database Save Successful",
+        description: "Deployment data has been saved to the database.",
+      });
+    } catch (error) {
+      console.error("Retry database save failed:", error);
+      toast({
+        title: "Database Save Failed",
+        description:
+          error instanceof Error ? error.message : "Failed to save to database",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingToDatabase(false);
+    }
+  };
+
+  const isLoading =
+    isWritePending || isConfirming || isParsingAddresses || isSavingToDatabase;
+  const isSuccess = isTxSuccess && deploymentResult?.databaseSaved === true;
 
   return {
     deployToken,
     deploymentResult,
-    data: hash,
-    error: deploymentError,
+    deploymentError,
     isLoading,
     isSuccess,
     isParsingAddresses,
+    isSavingToDatabase,
+    retryDatabaseSave,
     reset: () => {
       setDeploymentResult(null);
       setDeploymentError(null);
       setIsParsingAddresses(false);
+      setIsSavingToDatabase(false);
+      databaseSaveAttempted.current = false;
+      currentTransactionHash.current = null;
       resetWrite();
     },
   };
