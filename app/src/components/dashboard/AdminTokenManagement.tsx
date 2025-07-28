@@ -1,20 +1,37 @@
-// app/src/components/dashboard/AdminTokenManagement.tsx (NEW COMPONENT)
+// app/src/components/dashboard/AdminTokenManagement.tsx (TABLE VERSION)
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAccount } from "wagmi";
 import { useUserData } from "@/lib/hooks/use-token-data";
 import { useVestingContractBalance } from "@/lib/hooks/useTokenFunding";
 import { BulkFundingDialog } from "../vesting/BulkFundingDialog";
 import { FundContractDialog } from "../vesting/FundContractDialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { AlertTriangle, CheckCircle, DollarSign, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle,
+  DollarSign,
+  Users,
+  ExternalLink,
+  Settings,
+} from "lucide-react";
 import { formatEther } from "viem";
 
 export function AdminTokenManagement() {
   const [showBulkFunding, setShowBulkFunding] = useState(false);
+  const [selectedContracts, setSelectedContracts] = useState<string[]>([]);
   const [selectedToken, setSelectedToken] = useState<string | null>(null);
   const { address } = useAccount();
   const { data: userData, isLoading } = useUserData();
@@ -43,32 +60,236 @@ export function AdminTokenManagement() {
     );
   }
 
+  // Flatten all vesting contracts from all tokens
+  const allVestingContracts = ownedTokens.flatMap((token: any) =>
+    (token.vestingSchedules || []).map((schedule: any) => ({
+      ...schedule,
+      tokenName: token.name,
+      tokenSymbol: token.symbol,
+      tokenAddress: token.address,
+    }))
+  );
+
+  // Get funding status for all contracts
+  const contractsWithStatus = allVestingContracts.map((contract: any) => {
+    const { hassufficientBalance, shortfall } = useVestingContractBalance(
+      contract.tokenAddress,
+      contract.contractAddress
+    );
+    return {
+      ...contract,
+      hassufficientBalance,
+      shortfall,
+    };
+  });
+
+  const unfundedContracts = contractsWithStatus.filter(
+    (c: { hassufficientBalance: any }) => !c.hassufficientBalance
+  );
+  const totalUnfunded = unfundedContracts.length;
+  const totalShortfall = contractsWithStatus.reduce(
+    (sum: any, contract: { shortfall: any }) =>
+      sum + (contract.shortfall || 0n),
+    0n
+  );
+
+  const handleSelectContract = (contractAddress: string, checked: boolean) => {
+    if (checked) {
+      setSelectedContracts((prev) => [...prev, contractAddress]);
+    } else {
+      setSelectedContracts((prev) =>
+        prev.filter((addr) => addr !== contractAddress)
+      );
+    }
+  };
+
+  const handleSelectAll = () => {
+    const unfundedAddresses = unfundedContracts.map(
+      (c: { contractAddress: any }) => c.contractAddress
+    );
+    setSelectedContracts(unfundedAddresses);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedContracts([]);
+  };
+
+  const handleFundSelected = () => {
+    if (selectedContracts.length === 0) return;
+
+    // For bulk funding, we need to group by token
+    const groupedByToken = selectedContracts.reduce(
+      (acc: any, contractAddress) => {
+        const contract = contractsWithStatus.find(
+          (c: { contractAddress: string }) =>
+            c.contractAddress === contractAddress
+        );
+        if (!contract) return acc;
+
+        const tokenAddress = contract.tokenAddress;
+        if (!acc[tokenAddress]) {
+          acc[tokenAddress] = {
+            tokenAddress,
+            tokenSymbol: contract.tokenSymbol,
+            contracts: [],
+          };
+        }
+
+        acc[tokenAddress].contracts.push({
+          address: contractAddress,
+          beneficiary: contract.beneficiaryAddress,
+          totalAmount: parseFloat(contract.totalAmount), // Convert to token amount
+        });
+
+        return acc;
+      },
+      {}
+    );
+
+    // For simplicity, fund the first token's contracts
+    const firstToken = Object.values(groupedByToken)[0] as any;
+    if (firstToken) {
+      setSelectedToken(firstToken.tokenAddress);
+      setShowBulkFunding(true);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Header Card */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5" />
+            <Settings className="h-5 w-5" />
             Token Management Dashboard
           </CardTitle>
+          <div className="text-sm text-muted-foreground">
+            Manage funding and vesting for your deployed tokens
+          </div>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground mb-4">
-            Manage funding and vesting for your deployed tokens
-          </p>
+          {/* Summary Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-muted p-3 rounded-lg">
+              <div className="text-2xl font-bold">{ownedTokens.length}</div>
+              <div className="text-sm text-muted-foreground">
+                Tokens Deployed
+              </div>
+            </div>
+            <div className="bg-muted p-3 rounded-lg">
+              <div className="text-2xl font-bold">
+                {allVestingContracts.length}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Vesting Contracts
+              </div>
+            </div>
+            <div className="bg-muted p-3 rounded-lg">
+              <div className="text-2xl font-bold text-orange-600">
+                {totalUnfunded}
+              </div>
+              <div className="text-sm text-muted-foreground">Need Funding</div>
+            </div>
+            <div className="bg-muted p-3 rounded-lg">
+              <div className="text-2xl font-bold text-green-600">
+                {allVestingContracts.length - totalUnfunded}
+              </div>
+              <div className="text-sm text-muted-foreground">Fully Funded</div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {totalUnfunded > 0 && (
+                <>
+                  <Button onClick={handleSelectAll} variant="outline" size="sm">
+                    Select All Unfunded ({totalUnfunded})
+                  </Button>
+                  {selectedContracts.length > 0 && (
+                    <Button
+                      onClick={handleClearSelection}
+                      variant="ghost"
+                      size="sm"
+                    >
+                      Clear Selection
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+
+            {selectedContracts.length > 0 && (
+              <Button onClick={handleFundSelected} size="lg">
+                Fund Selected ({selectedContracts.length})
+              </Button>
+            )}
+
+            {totalUnfunded === 0 && (
+              <Alert className="border-green-200 bg-green-50 flex-1">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-800">
+                  ✅ All vesting contracts are properly funded
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
         </CardContent>
       </Card>
 
-      {ownedTokens.map((token: any) => (
-        <TokenManagementCard
-          key={token.address}
-          token={token}
-          onShowBulkFunding={() => {
-            setSelectedToken(token.address);
-            setShowBulkFunding(true);
-          }}
-        />
-      ))}
+      {/* Vesting Contracts Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Vesting Contracts ({allVestingContracts.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12">
+                  <Checkbox
+                    checked={
+                      selectedContracts.length === unfundedContracts.length &&
+                      unfundedContracts.length > 0
+                    }
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        handleSelectAll();
+                      } else {
+                        handleClearSelection();
+                      }
+                    }}
+                  />
+                </TableHead>
+                <TableHead>Token</TableHead>
+                <TableHead>Beneficiary</TableHead>
+                <TableHead>Contract</TableHead>
+                <TableHead>Total Amount</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Shortfall</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {contractsWithStatus.map((contract: any) => (
+                <VestingContractTableRow
+                  key={contract.contractAddress}
+                  contract={contract}
+                  isSelected={selectedContracts.includes(
+                    contract.contractAddress
+                  )}
+                  onSelect={(checked) =>
+                    handleSelectContract(contract.contractAddress, checked)
+                  }
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Bulk Funding Dialog */}
       {selectedToken && (
@@ -81,13 +302,21 @@ export function AdminTokenManagement() {
             "TOKEN"
           }
           vestingContracts={
-            ownedTokens
-              .find((t: any) => t.address === selectedToken)
-              ?.vestingSchedules?.map((schedule: any) => ({
-                address: schedule.contractAddress,
-                beneficiary: schedule.beneficiaryAddress,
-                totalAmount: BigInt(schedule.totalAmount),
-              })) || []
+            selectedContracts
+              .map((contractAddr) => {
+                const contract = contractsWithStatus.find(
+                  (c: { contractAddress: string }) =>
+                    c.contractAddress === contractAddr
+                );
+                return contract
+                  ? {
+                      address: contractAddr,
+                      beneficiary: contract.beneficiaryAddress,
+                      totalAmount: parseFloat(contract.totalAmount), // Token amount
+                    }
+                  : null;
+              })
+              .filter(Boolean) as any[]
           }
           userAddress={address!}
         />
@@ -96,175 +325,125 @@ export function AdminTokenManagement() {
   );
 }
 
-function TokenManagementCard({
-  token,
-  onShowBulkFunding,
+function VestingContractTableRow({
+  contract,
+  isSelected,
+  onSelect,
 }: {
-  token: any;
-  onShowBulkFunding: () => void;
+  contract: any;
+  isSelected: boolean;
+  onSelect: (checked: boolean) => void;
 }) {
   const [showFundDialog, setShowFundDialog] = useState(false);
-  const [selectedVestingContract, setSelectedVestingContract] = useState<
-    string | null
-  >(null);
   const { address } = useAccount();
 
-  // Calculate funding status for all vesting contracts
-  const vestingStatuses =
-    token.vestingSchedules?.map((schedule: any) => {
-      const { hassufficientBalance, shortfall } = useVestingContractBalance(
-        token.address,
-        schedule.contractAddress
-      );
-      return {
-        ...schedule,
-        hassufficientBalance,
-        shortfall,
-      };
-    }) || [];
-
-  const unfundedCount = vestingStatuses.filter(
-    (s: any) => !s.hassufficientBalance
-  ).length;
-  const totalShortfall = vestingStatuses.reduce(
-    (sum: any, status: any) => sum + (status.shortfall || 0n),
-    0n
-  );
-
-  const handleFundContract = (vestingContractAddress: string) => {
-    setSelectedVestingContract(vestingContractAddress);
-    setShowFundDialog(true);
-  };
+  const canSelect = !contract.hassufficientBalance;
+  const shortfallTokens = contract.shortfall
+    ? parseFloat(formatEther(contract.shortfall))
+    : 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
+    <>
+      <TableRow className={isSelected ? "bg-muted/50" : ""}>
+        <TableCell>
+          <Checkbox
+            checked={isSelected}
+            disabled={!canSelect}
+            onCheckedChange={onSelect}
+          />
+        </TableCell>
+
+        <TableCell>
           <div>
-            <CardTitle className="flex items-center gap-3">
-              {token.name} ({token.symbol})
-              {unfundedCount > 0 ? (
-                <Badge variant="destructive">{unfundedCount} Unfunded</Badge>
-              ) : (
-                <Badge className="bg-green-100 text-green-800">
-                  All Funded
-                </Badge>
-              )}
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {token.vestingSchedules?.length || 0} vesting contracts
-            </p>
+            <div className="font-medium">{contract.tokenName}</div>
+            <div className="text-sm text-muted-foreground">
+              ({contract.tokenSymbol})
+            </div>
           </div>
-          <div className="text-right">
-            <Button
-              onClick={onShowBulkFunding}
-              disabled={unfundedCount === 0}
-              size="sm"
-            >
-              Fund All Contracts
+        </TableCell>
+
+        <TableCell>
+          <div className="font-mono text-sm">
+            {contract.beneficiaryAddress.slice(0, 8)}...
+            {contract.beneficiaryAddress.slice(-6)}
+          </div>
+        </TableCell>
+
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm">
+              {contract.contractAddress.slice(0, 8)}...
+              {contract.contractAddress.slice(-6)}
+            </span>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" asChild>
+              <a
+                href={`https://sepolia.etherscan.io/address/${contract.contractAddress}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalLink className="h-3 w-3" />
+              </a>
             </Button>
           </div>
-        </div>
-      </CardHeader>
+        </TableCell>
 
-      <CardContent className="space-y-4">
-        {/* Summary Alert */}
-        {unfundedCount > 0 ? (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              {unfundedCount} vesting contracts need funding. Total shortfall:{" "}
-              {formatEther(totalShortfall)} {token.symbol}
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <Alert className="border-green-200 bg-green-50">
-            <CheckCircle className="h-4 w-4 text-green-600" />
-            <AlertDescription className="text-green-800">
-              ✅ All vesting contracts are properly funded
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Vesting Contracts List */}
-        <div className="space-y-2">
-          <h4 className="font-medium flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Vesting Contracts
-          </h4>
-          <div className="space-y-2">
-            {vestingStatuses.map((schedule: any) => (
-              <VestingContractRow
-                key={schedule.contractAddress}
-                schedule={schedule}
-                tokenSymbol={token.symbol}
-                onFund={() => handleFundContract(schedule.contractAddress)}
-              />
-            ))}
+        <TableCell>
+          <div className="font-medium">
+            {parseFloat(contract.totalAmount).toLocaleString()}{" "}
+            {contract.tokenSymbol}
           </div>
-        </div>
+        </TableCell>
 
-        {/* Individual Fund Dialog */}
-        {selectedVestingContract && address && (
-          <FundContractDialog
-            open={showFundDialog}
-            onOpenChange={(open) => {
-              setShowFundDialog(open);
-              if (!open) setSelectedVestingContract(null);
-            }}
-            tokenAddress={token.address}
-            vestingContractAddress={selectedVestingContract}
-            tokenSymbol={token.symbol}
-            userAddress={address}
-          />
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function VestingContractRow({
-  schedule,
-  tokenSymbol,
-  onFund,
-}: {
-  schedule: any;
-  tokenSymbol: string;
-  onFund: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between p-3 border rounded-lg">
-      <div className="flex-1">
-        <div className="font-medium">
-          {schedule.beneficiaryAddress.slice(0, 8)}...
-          {schedule.beneficiaryAddress.slice(-6)}
-        </div>
-        <div className="text-sm text-muted-foreground">
-          {parseFloat(schedule.totalAmount).toLocaleString()} {tokenSymbol}{" "}
-          total
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        {schedule.hassufficientBalance ? (
-          <Badge className="bg-green-100 text-green-800">
-            <CheckCircle className="h-3 w-3 mr-1" />
-            Funded
-          </Badge>
-        ) : (
-          <>
+        <TableCell>
+          {contract.hassufficientBalance ? (
+            <Badge className="bg-green-100 text-green-800">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Funded
+            </Badge>
+          ) : (
             <Badge variant="destructive">
               <AlertTriangle className="h-3 w-3 mr-1" />
-              Needs {schedule.shortfall
-                ? formatEther(schedule.shortfall)
-                : "0"}{" "}
-              {tokenSymbol}
+              Needs Funding
             </Badge>
-            <Button size="sm" variant="outline" onClick={onFund}>
-              Fund
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
+          )}
+        </TableCell>
+
+        <TableCell>
+          {shortfallTokens > 0 ? (
+            <span className="text-red-600 font-medium">
+              {shortfallTokens.toLocaleString()} {contract.tokenSymbol}
+            </span>
+          ) : (
+            <span className="text-green-600">-</span>
+          )}
+        </TableCell>
+
+        <TableCell>
+          <div className="flex items-center gap-2">
+            {!contract.hassufficientBalance && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowFundDialog(true)}
+              >
+                Fund
+              </Button>
+            )}
+          </div>
+        </TableCell>
+      </TableRow>
+
+      {/* Individual Fund Dialog */}
+      {address && (
+        <FundContractDialog
+          open={showFundDialog}
+          onOpenChange={setShowFundDialog}
+          tokenAddress={contract.tokenAddress}
+          vestingContractAddress={contract.contractAddress}
+          tokenSymbol={contract.tokenSymbol}
+          userAddress={address}
+        />
+      )}
+    </>
   );
 }
