@@ -6,7 +6,7 @@
  * Converts "1.5" to 1500000000000000000n
  */
 export function parseEther(etherValue: string): bigint {
-  if (!etherValue || etherValue === "") return BigInt(0);
+  if (!etherValue || etherValue === "") return 0n;
 
   // Handle decimal numbers
   const [whole = "0", decimal = ""] = etherValue.split(".");
@@ -24,7 +24,7 @@ export function formatEther(weiValue: bigint): string {
   const quotient = weiValue / divisor;
   const remainder = weiValue % divisor;
 
-  if (remainder === BigInt(0)) {
+  if (remainder === 0n) {
     return quotient.toString();
   }
 

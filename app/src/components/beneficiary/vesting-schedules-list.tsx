@@ -32,7 +32,10 @@ import {
   useClaimVestedTokens,
   useReleasableAmount,
 } from "@/lib/hooks/useTokenVesting";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useAccount } from "wagmi";
+import { useVestingContractBalance } from "@/lib/hooks/useTokenFunding";
+import { formatEther } from "@/lib/web3/native-utils";
 
 export function VestingSchedulesList() {
   const { data: userData, isLoading } = useUserData();
@@ -65,6 +68,10 @@ export function VestingSchedulesList() {
 }
 
 function VestingScheduleCard({ schedule }: { schedule: any }) {
+  const [showFundDialog, setShowFundDialog] = useState(false);
+  const { address } = useAccount();
+  const { toast } = useToast();
+
   const { data: releasableAmount } = useReleasableAmount(
     schedule.contractAddress
   );
@@ -74,7 +81,12 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
     error,
     reset,
   } = useClaimVestedTokens(schedule.contractAddress);
-  const { toast } = useToast();
+
+  // ADD FUNDING CHECK
+  const { hassufficientBalance } = useVestingContractBalance(
+    schedule.token.address,
+    schedule.contractAddress
+  );
 
   const progress = calculateVestingProgress(
     new Date(schedule.startTime).getTime() / 1000,
@@ -97,12 +109,21 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
           error.message || "The claim transaction failed. Please try again.",
         variant: "destructive",
       });
-      // Reset the hook state after showing error
       reset();
     }
   }, [error, toast, reset]);
 
   const handleClaim = async () => {
+    // CHECK FUNDING STATUS BEFORE CLAIMING
+    if (!hassufficientBalance) {
+      toast({
+        title: "Contract Not Funded",
+        description: `This vesting contract needs to be funded before you can claim.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (claimableAmount <= 0) {
       toast({
         title: "No tokens to claim",
@@ -113,22 +134,24 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
     }
 
     try {
-      await claimTokens(); // ✅ AWAIT the async function
+      await claimTokens();
       toast({
         title: "Claim initiated",
         description: "Your token claim transaction has been submitted.",
       });
     } catch (error) {
-      // Error handling is now done in useEffect above
       console.error("Claim error:", error);
     }
   };
 
   const getStatusColor = () => {
-    if (schedule.revoked) return "bg-red-100 text-red-800";
-    if (progress.isVestingComplete) return "bg-green-100 text-green-800";
-    if (progress.isCliffPeriod) return "bg-yellow-100 text-yellow-800";
-    return "bg-blue-100 text-blue-800";
+    if (schedule.revoked)
+      return "bg-red-100 text-red-800 hover:bg-red-200 hover:text-red-900";
+    if (progress.isVestingComplete)
+      return "bg-green-100 text-green-800 hover:bg-green-200 hover:text-green-900";
+    if (progress.isCliffPeriod)
+      return "bg-yellow-100 text-yellow-800 hover:bg-yellow-200 hover:text-yellow-900";
+    return "bg-blue-100 text-blue-800 hover:bg-blue-200 hover:text-blue-900";
   };
 
   const getStatusText = () => {
@@ -142,7 +165,7 @@ function VestingScheduleCard({ schedule }: { schedule: any }) {
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <div>
+          <div className="space-y-1">
             <CardTitle className="flex items-center gap-3">
               <span>
                 {schedule.token.name} ({schedule.token.symbol})

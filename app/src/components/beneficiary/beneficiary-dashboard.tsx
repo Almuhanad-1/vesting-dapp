@@ -1,6 +1,5 @@
-// src/components/beneficiary/beneficiary-dashboard.tsx
-"use client";
-
+// app/src/components/beneficiary/BeneficiaryDashboard.tsx
+import React from "react";
 import {
   Card,
   CardContent,
@@ -8,14 +7,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-import { Button } from "@/components/ui/button";
 import { useAccount } from "wagmi";
 import { useUserData } from "@/lib/hooks/use-token-data";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { Coins, Clock, TrendingUp, Gift } from "lucide-react";
+import { Coins, Clock, TrendingUp, Gift, AlertTriangle } from "lucide-react";
 import { VestingProgressChart } from "@/components/charts/vesting-progress-chart";
 import { calculateVestingProgress } from "@/lib/web3/utils";
+import { useVestingContractBalance } from "@/lib/hooks/useTokenFunding";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function BeneficiaryDashboard() {
   const { address } = useAccount();
@@ -39,8 +38,23 @@ export function BeneficiaryDashboard() {
 
   const { stats, vestingSchedules } = userData;
 
-  // Calculate claimable amounts
-  const claimableSchedules = vestingSchedules.filter((schedule: any) => {
+  // Check funding status for all schedules
+  const fundingStatuses = vestingSchedules.map((schedule: any) => {
+    const { hassufficientBalance } = useVestingContractBalance(
+      schedule.token.address,
+      schedule.contract_address
+    );
+    return { ...schedule, hassufficientBalance };
+  });
+
+  const unfundedCount = fundingStatuses.filter(
+    (s: any) => !s.hassufficientBalance
+  ).length;
+
+  // Calculate claimable amounts (only for funded contracts)
+  const claimableSchedules = fundingStatuses.filter((schedule: any) => {
+    if (!schedule.hassufficientBalance) return false;
+
     const now = Date.now() / 1000;
     const startTime = new Date(schedule.startTime).getTime() / 1000;
     const cliffEnd = startTime + schedule.cliffDuration;
@@ -55,47 +69,54 @@ export function BeneficiaryDashboard() {
         schedule.vestingDuration
       );
       const totalAmount = parseFloat(schedule.totalAmount);
-      const released = parseFloat(schedule.releasedAmount || "0");
-      const vested = (totalAmount * progress.progressPercentage) / 100;
-      return sum + Math.max(0, vested - released);
+      const releasedAmount = parseFloat(schedule.releasedAmount || "0");
+      const vestedAmount = (totalAmount * progress.progressPercentage) / 100;
+      return sum + Math.max(0, vestedAmount - releasedAmount);
     },
     0
   );
 
   return (
     <div className="space-y-6">
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Vesting Positions
-            </CardTitle>
-            <Gift className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.tokensReceiving}</div>
-            <p className="text-xs text-muted-foreground">Active positions</p>
-          </CardContent>
-        </Card>
+      {/* Unfunded Contracts Alert */}
+      {/* {unfundedCount > 0 && (
+        <Alert variant="destructive" className="border-orange-200 bg-orange-50">
+          <AlertTriangle className="h-4 w-4 text-orange-600" />
+          <AlertDescription className="text-orange-800">
+            <div className="space-y-1">
+              <p className="font-medium">
+                ⏳ {unfundedCount} of your vesting contracts are not yet funded
+              </p>
+              <p className="text-sm">
+                You cannot claim from unfunded contracts. Contact the token
+                owners to fund these contracts.
+              </p>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )} */}
 
+      {/* Stats Grid */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Vested</CardTitle>
-            <Coins className="h-4 w-4 text-muted-foreground" />
+            <Gift className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
               {stats.totalTokensVested.toLocaleString()}
             </div>
-            <p className="text-xs text-muted-foreground">Tokens allocated</p>
+            <p className="text-xs text-muted-foreground">
+              Across {stats.activeSchedules} schedules
+            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Claimed</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Total Claimed</CardTitle>
+            <Coins className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -120,13 +141,32 @@ export function BeneficiaryDashboard() {
             <div className="text-2xl font-bold text-green-600">
               {totalClaimable.toLocaleString()}
             </div>
-            <p className="text-xs text-muted-foreground">Ready to claim</p>
+            <p className="text-xs text-muted-foreground">
+              From funded contracts
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Awaiting Funding
+            </CardTitle>
+            <AlertTriangle className="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">
+              {unfundedCount}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Contracts need funding
+            </p>
           </CardContent>
         </Card>
       </div>
 
       {/* Vesting Progress Chart */}
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle>Vesting Progress Overview</CardTitle>
           <CardDescription>
@@ -136,31 +176,33 @@ export function BeneficiaryDashboard() {
         <CardContent>
           <VestingProgressChart data={vestingSchedules} />
         </CardContent>
-      </Card>
+      </Card> */}
 
-      {/* Quick Actions */}
+      {/* Status Summary */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Quick Claim</CardTitle>
+            <CardTitle>Ready to Claim</CardTitle>
             <CardDescription>
-              Claim tokens that are ready for release
+              Funded contracts with claimable tokens
             </CardDescription>
           </CardHeader>
           <CardContent>
             {totalClaimable > 0 ? (
-              <div className="space-y-4">
-                <div className="text-lg font-semibold text-green-600">
-                  {totalClaimable.toLocaleString()} tokens ready to claim
+              <div className="text-center py-4">
+                <div className="text-3xl font-bold text-green-600 mb-2">
+                  {totalClaimable.toLocaleString()}
                 </div>
-                <Button className="w-full">Claim All Available Tokens</Button>
+                <p className="text-muted-foreground">tokens ready to claim</p>
               </div>
             ) : (
-              <div className="text-center py-4 text-muted-foreground">
-                <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>No tokens available to claim right now</p>
-                <p className="text-sm">
-                  Check back later or view individual schedules
+              <div className="text-center py-4">
+                <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-muted-foreground">
+                  No tokens available to claim yet
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Check back later or when contracts are funded
                 </p>
               </div>
             )}
@@ -169,58 +211,34 @@ export function BeneficiaryDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Upcoming Releases</CardTitle>
-            <CardDescription>Next scheduled token releases</CardDescription>
+            <CardTitle>Pending Actions</CardTitle>
+            <CardDescription>Items requiring attention</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {vestingSchedules
-                .filter((schedule: any) => !schedule.revoked)
-                .slice(0, 3)
-                .map((schedule: any, index: number) => {
-                  const progress = calculateVestingProgress(
-                    new Date(schedule.startTime).getTime() / 1000,
-                    schedule.cliffDuration,
-                    schedule.vestingDuration
-                  );
-
-                  return (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between p-3 bg-muted rounded-lg"
-                    >
-                      <div>
-                        <div className="font-medium">
-                          {schedule.token.symbol}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {schedule.category} •{" "}
-                          {parseFloat(schedule.totalAmount).toLocaleString()}{" "}
-                          tokens
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-medium">
-                          {progress.progressPercentage.toFixed(1)}%
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {progress.isVestingComplete
-                            ? "Complete"
-                            : progress.isCliffPeriod
-                            ? "In cliff"
-                            : "Vesting"}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-              {vestingSchedules.length === 0 && (
-                <div className="text-center py-4 text-muted-foreground">
-                  <p>No active vesting schedules</p>
+            {unfundedCount > 0 ? (
+              <div className="text-center py-4">
+                <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-orange-500" />
+                <div className="text-2xl font-bold text-orange-600 mb-2">
+                  {unfundedCount}
                 </div>
-              )}
-            </div>
+                <p className="text-muted-foreground">
+                  contracts awaiting funding
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Contact token owners to fund these contracts
+                </p>
+              </div>
+            ) : (
+              <div className="text-center py-4">
+                <Gift className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <p className="text-green-600 font-medium">
+                  All contracts funded!
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  You can claim tokens as they vest
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
