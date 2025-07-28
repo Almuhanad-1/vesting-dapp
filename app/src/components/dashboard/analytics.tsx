@@ -26,6 +26,7 @@ import {
   Cell,
 } from "recharts";
 import { TrendingUp, TrendingDown, Users, Calendar } from "lucide-react";
+import { weiToTokens } from "@/lib/utils/tokenUtils";
 
 export function Analytics() {
   const { data: userData, isLoading } = useUserData();
@@ -83,8 +84,10 @@ export function Analytics() {
   const statusData = deployedTokens.reduce((acc: any, token: any) => {
     const activeSchedules = token.vestingSchedules.filter((schedule: any) => {
       const now = new Date();
+      // Parse startTime in "YYYY-MM-DD HH:mm:ss.SSS" format
+      const startTime = new Date(schedule.startTime.replace(" ", "T"));
       const endTime = new Date(
-        schedule.startTime.getTime() + schedule.vestingDuration * 1000
+        startTime.getTime() + schedule.vestingDuration * 1000
       );
       return endTime > now && !schedule.revoked;
     }).length;
@@ -323,7 +326,7 @@ export function Analytics() {
                 {(
                   (vestingSchedules.reduce(
                     (sum: number, s: any) =>
-                      sum + parseFloat(s.releasedAmount || "0"),
+                      sum + weiToTokens(s.releasedAmount || "0"),
                     0
                   ) /
                     vestingSchedules.reduce(
@@ -343,8 +346,9 @@ export function Analytics() {
                 {
                   vestingSchedules.filter((s: any) => {
                     const now = new Date();
+                    const startTime = new Date(s.startTime.replace(" ", "T"));
                     const endTime = new Date(
-                      s.startTime.getTime() + s.vestingDuration * 1000
+                      startTime.getTime() + s.vestingDuration * 1000
                     );
                     return endTime > now && !s.revoked;
                   }).length

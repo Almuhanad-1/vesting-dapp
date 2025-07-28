@@ -1,11 +1,11 @@
-// app/src/lib/hooks/useTokenFunding.ts
+// app/src/lib/hooks/useTokenFunding.ts (UPDATED COMMENTS)
 import { useState } from "react";
 import {
   useWriteContract,
   useWaitForTransactionReceipt,
   useReadContract,
 } from "wagmi";
-import { parseEther, formatEther } from "viem";
+import { formatEther } from "viem";
 import { ERC20_ABI, TOKEN_VESTING_ABI } from "@/lib/web3/config";
 
 // Hook to check if vesting contract has sufficient tokens
@@ -20,7 +20,7 @@ export function useVestingContractBalance(
     args: [vestingContractAddress],
     query: {
       enabled: !!(tokenAddress && vestingContractAddress),
-      refetchInterval: 10000, // Check every 10 seconds
+      refetchInterval: 10000,
     },
   });
 
@@ -33,30 +33,23 @@ export function useVestingContractBalance(
     },
   });
 
-  const bigintBalance =
-    typeof balance === "string" ||
-    typeof balance === "number" ||
-    typeof balance === "bigint"
-      ? BigInt(balance)
-      : 0n;
-  const bigintTotalAmount = totalAmount ? BigInt(totalAmount) : 0n;
-
   const hassufficientBalance =
-    bigintBalance && bigintTotalAmount
-      ? bigintBalance >= bigintTotalAmount
-      : false;
-
+    balance && totalAmount ? (balance as bigint) >= totalAmount : false;
   const shortfall =
-    bigintBalance && bigintTotalAmount && bigintBalance < bigintTotalAmount
-      ? bigintTotalAmount - bigintBalance
+    balance && totalAmount && (balance as bigint) < totalAmount
+      ? totalAmount - (balance as bigint)
       : 0n;
 
   return {
-    balance: bigintBalance,
-    totalAmount: bigintTotalAmount,
+    balance, // Wei amount
+    totalAmount, // Wei amount
     hassufficientBalance,
-    shortfall,
+    shortfall, // Wei amount
     isLoading: !balance && !totalAmount,
+    // ✅ TOKEN CONVERSION HELPERS FOR DISPLAY
+    balanceTokens: balance ? parseFloat(formatEther(balance as bigint)) : 0,
+    totalAmountTokens: totalAmount ? parseFloat(formatEther(totalAmount)) : 0,
+    shortfallTokens: shortfall ? parseFloat(formatEther(shortfall)) : 0,
   };
 }
 
@@ -75,10 +68,11 @@ export function useSendTokensToVesting() {
     hash,
   });
 
+  // ✅ ACCEPTS WEI AMOUNT FOR BLOCKCHAIN TRANSACTION
   const sendTokens = async (
     tokenAddress: string,
     vestingContractAddress: string,
-    amount: bigint
+    amountInWei: bigint // Must be in Wei
   ) => {
     try {
       setIsPending(true);
@@ -87,7 +81,7 @@ export function useSendTokensToVesting() {
         address: tokenAddress as `0x${string}`,
         abi: ERC20_ABI,
         functionName: "transfer",
-        args: [vestingContractAddress, amount],
+        args: [vestingContractAddress, amountInWei],
       });
     } catch (err) {
       console.error("Send tokens error:", err);
@@ -110,7 +104,7 @@ export function useUserTokenBalance(
   tokenAddress?: string,
   userAddress?: string
 ) {
-  return useReadContract({
+  const { data: balance } = useReadContract({
     address: tokenAddress as `0x${string}`,
     abi: ERC20_ABI,
     functionName: "balanceOf",
@@ -120,4 +114,10 @@ export function useUserTokenBalance(
       refetchInterval: 30000,
     },
   });
+
+  return {
+    data: balance, // Wei amount
+    // ✅ TOKEN CONVERSION HELPER FOR DISPLAY
+    balanceTokens: balance ? parseFloat(formatEther(balance as bigint)) : 0,
+  };
 }

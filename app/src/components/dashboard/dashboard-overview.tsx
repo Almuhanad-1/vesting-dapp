@@ -135,40 +135,6 @@ export function DashboardOverview() {
           </CardContent>
         </Card>
       ))} */}
-
-      {/* Contract Info Card */}
-      <Card className="md:col-span-2 lg:col-span-4">
-        <CardHeader>
-          <CardTitle className="text-lg">Contract Information</CardTitle>
-          <CardDescription>
-            Real contract data from your deployed factory
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-muted p-3 rounded-lg">
-              <div className="text-sm text-muted-foreground">
-                Factory Address
-              </div>
-              <div className="font-mono text-sm">
-                {CONTRACT_ADDRESSES.FACTORY}
-              </div>
-            </div>
-            <div className="bg-muted p-3 rounded-lg">
-              <div className="text-sm text-muted-foreground">Batch Counter</div>
-              <div className="font-semibold">
-                {batchCounter?.toString() || "0"}
-              </div>
-            </div>
-            <div className="bg-muted p-3 rounded-lg">
-              <div className="text-sm text-muted-foreground">Status</div>
-              <div className="font-semibold text-green-600">
-                {implementations ? "Connected" : "Connecting..."}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

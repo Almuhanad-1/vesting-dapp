@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { useDeploymentStore } from "@/store/deployment-store";
 import type { DeploymentResult } from "@/lib/hooks/useTokenVestingFactory";
+import { PostDeploymentActions } from "@/components/deploy/PostDeploymentActions";
+import { useAccount } from "wagmi";
 
 interface DeploymentSuccessStepProps {
   deploymentResult: DeploymentResult | null;
@@ -44,6 +46,7 @@ export function DeploymentSuccessStep({
   const { tokenConfig, vestingSchedules, beneficiaries } = useDeploymentStore();
   const { toast } = useToast();
   const [copied, setCopied] = useState<string | null>(null);
+  const { address: userAddress } = useAccount();
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -157,7 +160,7 @@ export function DeploymentSuccessStep({
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Database Status */}
-          <div className="flex items-center justify-between p-4 rounded-lg border">
+          {/* <div className="flex items-center justify-between p-4 rounded-lg border">
             <div className="flex items-center gap-3">
               <Database
                 className={`h-5 w-5 ${
@@ -213,7 +216,15 @@ export function DeploymentSuccessStep({
                 </>
               )}
             </div>
-          </div>
+          </div> */}
+
+          {/* Post Deployment Actions */}
+          <PostDeploymentActions
+            deploymentResult={deploymentResult}
+            tokenConfig={tokenConfig!}
+            beneficiaries={beneficiaries}
+            userAddress={userAddress!}
+          />
 
           {/* Token Contract */}
           <div className="space-y-4">

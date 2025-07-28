@@ -4,10 +4,8 @@
 import { useAccount } from "wagmi";
 import { Navbar } from "@/components/layout/navbar";
 import { ConnectWalletPrompt } from "@/components/web3/connect-wallet-prompt";
-import { DashboardOverview } from "@/components/dashboard/dashboard-overview";
-import { RecentDeployments } from "@/components/dashboard/recent-deployments";
-import { QuickActions } from "@/components/dashboard/quick-actions";
 import { Analytics } from "@/components/dashboard/analytics";
+import { AdminTokenManagement } from "@/components/dashboard/AdminTokenManagement";
 
 export default function DashboardPage() {
   const { isConnected } = useAccount();
@@ -32,16 +30,8 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="grid gap-6">
-          <DashboardOverview />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <RecentDeployments />
-            </div>
-            <div>
-              <QuickActions />
-            </div>
-          </div>
+        <div className="">
+          <AdminTokenManagement />
           <Analytics />
         </div>
       </div>

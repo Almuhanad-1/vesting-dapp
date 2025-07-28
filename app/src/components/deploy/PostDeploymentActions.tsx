@@ -1,25 +1,20 @@
-// app/src/components/deploy/PostDeploymentActions.tsx (NEW COMPONENT)
+// app/src/components/deploy/PostDeploymentActions.tsx (UPDATED)
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CheckCircle, AlertTriangle, ExternalLink } from "lucide-react";
+import { CheckCircle, AlertTriangle } from "lucide-react";
 import { BulkFundingDialog } from "../vesting/BulkFundingDialog";
+import {
+  Beneficiary,
+  DeploymentResult,
+  TokenConfig,
+} from "@/store/deployment-store";
 
 interface PostDeploymentActionsProps {
-  deploymentResult: {
-    tokenAddress: string;
-    vestingContracts: string[];
-    transactionHash: string;
-  };
-  tokenConfig: {
-    name: string;
-    symbol: string;
-  };
-  beneficiaries: Array<{
-    address: string;
-    amount: string;
-  }>;
+  deploymentResult: DeploymentResult;
+  tokenConfig: TokenConfig;
+  beneficiaries: Beneficiary[];
   userAddress: string;
 }
 
@@ -31,12 +26,23 @@ export function PostDeploymentActions({
 }: PostDeploymentActionsProps) {
   const [showFundDialog, setShowFundDialog] = useState(false);
 
+  // ✅ KEEP TOKEN AMOUNTS AS-IS (NO WEI CONVERSION)
   const vestingContracts = deploymentResult.vestingContracts.map(
-    (address, index) => ({
-      address,
-      beneficiary: beneficiaries[index]?.address || "Unknown",
-      totalAmount: BigInt(beneficiaries[index]?.amount || "0"),
-    })
+    (address, index) => {
+      const beneficiary = beneficiaries[index];
+      const tokenAmount = parseFloat(beneficiary?.amount || "0");
+
+      return {
+        address,
+        beneficiary: beneficiary?.address || "Unknown",
+        totalAmount: tokenAmount, // Keep as token amount
+      };
+    }
+  );
+
+  const totalAmountToFund = beneficiaries.reduce(
+    (sum, b) => sum + parseFloat(b.amount || "0"),
+    0
   );
 
   return (
@@ -64,36 +70,19 @@ export function PostDeploymentActions({
         </AlertDescription>
       </Alert>
 
-      {/* Quick Actions */}
+      {/* Single Action - Fund Contracts */}
       <Card>
         <CardHeader>
-          <CardTitle>Next Steps</CardTitle>
+          <CardTitle>Required Action</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col space-y-3">
-            <Button
-              onClick={() => setShowFundDialog(true)}
-              className="w-full"
-              size="lg"
-            >
-              1. Fund All Vesting Contracts
-            </Button>
-
-            <Button variant="outline" className="w-full" asChild>
-              <a
-                href={`https://sepolia.etherscan.io/tx/${deploymentResult.transactionHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                2. View Transaction on Etherscan
-                <ExternalLink className="ml-2 h-4 w-4" />
-              </a>
-            </Button>
-
-            <Button variant="outline" className="w-full" asChild>
-              <a href="/dashboard">3. Go to Dashboard</a>
-            </Button>
-          </div>
+        <CardContent>
+          <Button
+            onClick={() => setShowFundDialog(true)}
+            className="w-full"
+            size="lg"
+          >
+            Fund All Vesting Contracts
+          </Button>
         </CardContent>
       </Card>
 
@@ -105,8 +94,16 @@ export function PostDeploymentActions({
         <CardContent>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
+              <span>Token:</span>
+              <span className="font-medium">
+                {tokenConfig.name} ({tokenConfig.symbol})
+              </span>
+            </div>
+            <div className="flex justify-between">
               <span>Token Address:</span>
-              <span className="font-mono">{deploymentResult.tokenAddress}</span>
+              <span className="font-mono text-xs">
+                {deploymentResult.tokenAddress}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Vesting Contracts:</span>
@@ -115,6 +112,12 @@ export function PostDeploymentActions({
             <div className="flex justify-between">
               <span>Total Beneficiaries:</span>
               <span>{beneficiaries.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Total Amount to Fund:</span>
+              <span className="font-medium">
+                {totalAmountToFund.toLocaleString()} {tokenConfig.symbol}
+              </span>
             </div>
           </div>
         </CardContent>

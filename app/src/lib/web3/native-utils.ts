@@ -1,6 +1,8 @@
 // Native JavaScript replacements for viem functions
 // No external dependencies needed!
 
+import { CONTRACT_ADDRESSES } from "./config";
+
 /**
  * Parse ether string to wei bigint (replaces parseEther)
  * Converts "1.5" to 1500000000000000000n
@@ -75,8 +77,10 @@ export function parseContractLogs(logs: any[]): {
   for (const log of logs) {
     if (
       log.address &&
-      log.address !== "0x0000000000000000000000000000000000000000"
+      log.address !== "0x0000000000000000000000000000000000000000" &&
+      log.address.toLowerCase() !== CONTRACT_ADDRESSES.FACTORY.toLowerCase() // ✅ EXCLUDE FACTORY
     ) {
+      console.log(`Found contract address: ${log.address}`);
       contractAddresses.add(log.address.toLowerCase());
     }
   }

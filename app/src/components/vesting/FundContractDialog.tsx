@@ -1,4 +1,4 @@
-// app/src/components/vesting/FundContractDialog.tsx
+// app/src/components/vesting/FundContractDialog.tsx (UPDATED)
 import React, { useState, useEffect } from "react";
 import {
   Dialog,
@@ -48,12 +48,21 @@ export function FundContractDialog({
   );
   const { sendTokens, isLoading, isSuccess, error } = useSendTokensToVesting();
 
+  // ✅ CONVERT WEI VALUES TO TOKEN AMOUNTS FOR DISPLAY
+  const userBalanceTokens = userBalance
+    ? parseFloat(formatEther(userBalance as bigint))
+    : 0;
+  const shortfallTokens = shortfall ? parseFloat(formatEther(shortfall)) : 0;
+  const totalAmountTokens = totalAmount
+    ? parseFloat(formatEther(totalAmount))
+    : 0;
+
   // Auto-fill recommended amount
   useEffect(() => {
-    if (shortfall && shortfall > 0n) {
-      setAmount(formatEther(shortfall));
+    if (shortfallTokens > 0) {
+      setAmount(shortfallTokens.toString());
     }
-  }, [shortfall]);
+  }, [shortfallTokens]);
 
   // Handle success
   useEffect(() => {
@@ -88,27 +97,25 @@ export function FundContractDialog({
       return;
     }
 
+    const amountFloat = parseFloat(amount);
+
+    if (amountFloat > userBalanceTokens) {
+      toast({
+        title: "Insufficient Balance",
+        description: "You don't have enough tokens",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
+      // ✅ CONVERT TOKEN AMOUNT TO WEI ONLY FOR BLOCKCHAIN TRANSACTION
       const amountWei = parseEther(amount);
-
-      if (typeof userBalance === "bigint" && amountWei > userBalance) {
-        toast({
-          title: "Insufficient Balance",
-          description: "You don't have enough tokens",
-          variant: "destructive",
-        });
-        return;
-      }
-
       await sendTokens(tokenAddress, vestingContractAddress, amountWei);
     } catch (err) {
       console.error("Send tokens error:", err);
     }
   };
-
-  const maxAmount =
-    typeof userBalance === "bigint" ? formatEther(userBalance) : "0";
-  const recommendedAmount = shortfall ? formatEther(shortfall) : "0";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -128,14 +135,11 @@ export function FundContractDialog({
             <AlertDescription>
               <div className="space-y-1 text-sm">
                 <div>
-                  Required: {totalAmount ? formatEther(totalAmount) : "0"}{" "}
+                  Required: {totalAmountTokens.toLocaleString()} {tokenSymbol}
+                </div>
+                <div>
+                  Your Balance: {userBalanceTokens.toLocaleString()}{" "}
                   {tokenSymbol}
-                </div>
-                <div>
-                  Recommended: {recommendedAmount} {tokenSymbol}
-                </div>
-                <div>
-                  Your Balance: {maxAmount} {tokenSymbol}
                 </div>
               </div>
             </AlertDescription>
@@ -152,20 +156,14 @@ export function FundContractDialog({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 className="flex-1"
+                step="0.000001"
+                min="0"
               />
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setAmount(recommendedAmount)}
-                disabled={!shortfall || shortfall === 0n}
-              >
-                Recommended
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAmount(maxAmount)}
-                disabled={!userBalance || userBalance === 0n}
+                onClick={() => setAmount(totalAmountTokens.toString())}
+                disabled={userBalanceTokens <= 0}
               >
                 Max
               </Button>
@@ -173,16 +171,15 @@ export function FundContractDialog({
           </div>
 
           {/* Warnings */}
-          {typeof userBalance === "bigint" &&
-            parseFloat(amount) > 0 &&
-            parseEther(amount) > userBalance && (
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  Insufficient balance. You only have {maxAmount} {tokenSymbol}.
-                </AlertDescription>
-              </Alert>
-            )}
+          {parseFloat(amount) > userBalanceTokens && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                Insufficient balance. You only have{" "}
+                {userBalanceTokens.toLocaleString()} {tokenSymbol}.
+              </AlertDescription>
+            </Alert>
+          )}
         </div>
 
         <DialogFooter>
