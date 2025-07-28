@@ -15,6 +15,7 @@ import { VestingProgressChart } from "@/components/charts/vesting-progress-chart
 import { calculateVestingProgress } from "@/lib/web3/utils";
 import { useVestingContractBalance } from "@/lib/hooks/useTokenFunding";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { weiToTokens } from "@/lib/utils/tokenUtils";
 
 export function BeneficiaryDashboard() {
   const { address } = useAccount();
@@ -120,13 +121,14 @@ export function BeneficiaryDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {stats.totalTokensClaimed.toLocaleString()}
+              {weiToTokens(BigInt(stats.totalTokensClaimed)).toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
               {(
-                (stats.totalTokensClaimed / stats.totalTokensVested) *
+                (weiToTokens(BigInt(stats.totalTokensClaimed)) /
+                  stats.totalTokensVested) *
                 100
-              ).toFixed(1)}
+              ).toFixed(2)}
               % of total
             </p>
           </CardContent>

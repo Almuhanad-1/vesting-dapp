@@ -22,6 +22,7 @@ import { useUserData } from "@/lib/hooks/use-token-data";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ExternalLink, History } from "lucide-react";
 import { shortenAddress } from "@/lib/web3/utils";
+import { weiToTokens } from "@/lib/utils/tokenUtils";
 
 export function ClaimHistory() {
   const { data: userData, isLoading } = useUserData();
@@ -82,7 +83,6 @@ export function ClaimHistory() {
               <TableHead>Category</TableHead>
               <TableHead>Amount</TableHead>
               <TableHead>Transaction</TableHead>
-              <TableHead>Gas Used</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -111,7 +111,7 @@ export function ClaimHistory() {
                 </TableCell>
                 <TableCell>
                   <div className="font-medium text-green-600">
-                    +{parseFloat(claim.amountClaimed).toLocaleString()}
+                    +{weiToTokens(claim.amountClaimed).toFixed(2)}
                   </div>
                 </TableCell>
                 <TableCell>
@@ -128,13 +128,6 @@ export function ClaimHistory() {
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   </Button>
-                </TableCell>
-                <TableCell>
-                  <div className="text-sm">
-                    {claim.gasUsed
-                      ? parseFloat(claim.gasUsed).toLocaleString()
-                      : "N/A"}
-                  </div>
                 </TableCell>
               </TableRow>
             ))}
