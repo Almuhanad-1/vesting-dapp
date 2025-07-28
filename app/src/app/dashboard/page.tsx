@@ -4,7 +4,6 @@
 import { useAccount } from "wagmi";
 import { Navbar } from "@/components/layout/navbar";
 import { ConnectWalletPrompt } from "@/components/web3/connect-wallet-prompt";
-import { Analytics } from "@/components/dashboard/analytics";
 import { AdminTokenManagement } from "@/components/dashboard/AdminTokenManagement";
 
 export default function DashboardPage() {
@@ -32,7 +31,6 @@ export default function DashboardPage() {
 
         <div className="">
           <AdminTokenManagement />
-          <Analytics />
         </div>
       </div>
     </>
