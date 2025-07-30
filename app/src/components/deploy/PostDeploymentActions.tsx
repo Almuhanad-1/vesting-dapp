@@ -56,11 +56,11 @@ export function PostDeploymentActions({
       </Alert>
 
       {/* Important Next Step */}
-      <Alert variant="destructive">
+      <Alert variant="default" className="border-yellow-200 bg-yellow-50">
         <AlertTriangle className="h-4 w-4" />
         <AlertDescription>
           <div className="space-y-2">
-            <p className="font-medium">⚠️ Important: Fund Vesting Contracts</p>
+            <p className="font-medium">Important: Fund Vesting Contracts</p>
             <p>
               Your vesting contracts have been created but need to be funded
               with {tokenConfig.symbol} tokens before beneficiaries can claim.

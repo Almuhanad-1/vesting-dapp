@@ -12,6 +12,7 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { waitForDeploymentAndParse } from "@/lib/web3/transaction-parser";
 import { useToast } from "@/lib/hooks/use-toast";
+import { formatEther } from "viem";
 
 export interface TokenConfig {
   name: string;
@@ -260,7 +261,7 @@ export function useDeployTokenWithVesting() {
         tokenConfig: {
           name: tokenConfig.name,
           symbol: tokenConfig.symbol,
-          totalSupply: tokenConfig.totalSupply.toString(),
+          totalSupply: formatEther(tokenConfig.totalSupply),
           decimals: 18,
         },
         vestingSchedules,
